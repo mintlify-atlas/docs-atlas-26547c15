@@ -1,10 +1,10 @@
 ---
-title: "Geo Class: Solar Geometry Calculations"
+title: "Geo Class: Solar Geometry and Clear-Sky GHI API Ref"
 sidebarTitle: "Geo"
-description: "API reference for the Geo class — computes solar zenith angle, TOA irradiance, air mass, and clear-sky GHI for any location and time range."
+description: "API reference for the Geo class — builds a DataFrame of solar geometry columns: zenith angle, TOA irradiance, air mass, and ARGP clear-sky GHI."
 ---
 
-The `Geo` class (in `helpers/Geo.py`) accepts a pandas `DatetimeIndex` and site coordinates, then populates a DataFrame with all relevant solar geometry columns needed for quality control and clear-sky modeling. On construction every column is computed in a single pass over the date range — no further method calls are required to access the results.
+The `Geo` class (in `helpers/Geo.py`) accepts a pandas `DatetimeIndex` and site coordinates, then populates a DataFrame with all relevant solar geometry columns needed for quality control and clear-sky modelling. Every column is computed in a single constructor pass — no further method calls are required to access the results.
 
 ---
 
@@ -29,26 +29,26 @@ Geo(range_dates, lat, long, gmt, alt, beta)
 </ParamField>
 
 <ParamField path="gmt" type="int" required>
-  UTC offset of the site (e.g. `0` for UTC, `-3` for Argentina standard time). The constructor uses `abs(gmt)` internally when computing the sign correction for solar hour.
+  UTC offset of the site (e.g. `0` for UTC, `-3` for Argentina standard time). The constructor uses the sign of `gmt` internally when computing the longitude correction for solar hour.
 </ParamField>
 
 <ParamField path="alt" type="float" required>
-  Site altitude in metres above sea level. Used for the air-mass pressure correction and for choosing the `ktrp` branch in the ARGP clear-sky model.
+  Site altitude in metres above sea level. Used for the air-mass pressure correction in `Mak` and for selecting the `ktrp` branch in `getKtrp`.
 </ParamField>
 
 <ParamField path="beta" type="float" required>
-  Panel tilt angle in degrees. Pass `0` for a horizontal surface (GHI geometry).
+  Panel tilt angle in degrees. Pass `0` for a horizontal surface (GHI geometry). This parameter is stored but not used in any active computation in the current version.
 </ParamField>
 
 ### Returns
 
-An instance whose `.df` attribute is a `pd.DataFrame` containing all computed columns described in the table below. The constructor has no additional return value.
+An instance whose `.df` attribute is a `pd.DataFrame` containing all computed columns described below. The constructor also sets instance attributes `self.ktrp` and `self.ktrp2`.
 
 ---
 
 ## Output DataFrame: `Geo.df`
 
-Every row corresponds to one timestamp in `range_dates`. All columns are appended in the order listed.
+Every row corresponds to one timestamp in `range_dates`. Columns are appended in the order listed.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -58,7 +58,7 @@ Every row corresponds to one timestamp in `range_dates`. All columns are appende
 | `Y` | int | Four-digit year |
 | `E` | float | Equation of time in minutes |
 | `HR` | float | Local clock hour as a decimal (e.g. `13.5` = 13:30) |
-| `HS` | float | Solar hour as a decimal, corrected for longitude and equation of time |
+| `HS` | float | Solar hour, corrected for longitude and equation of time |
 | `deltaRad` | float | Solar declination in radians |
 | `delta` | float | Solar declination in degrees |
 | `ws` | float | Sunset hour angle in radians: `arccos(−tan(δ)·tan(lat))` |
@@ -68,20 +68,52 @@ Every row corresponds to one timestamp in `range_dates`. All columns are appende
 | `lat` | float | Site latitude (constant column, repeated for every row) |
 | `CTZ` | float | `cos(θz)` — cosine of the solar zenith angle |
 | `TZ` | float | Solar zenith angle `θz` in radians: `arccos(CTZ)` |
-| `SZA` | float | Solar Zenith Angle in degrees |
+| `SZA` | float | Solar zenith angle in degrees |
 | `alphaS` | float | Solar elevation angle in degrees: `arcsin(CTZ)` in degrees |
 | `E0` | float | Orbital eccentricity correction factor |
 | `TOA` | float | Top-of-atmosphere irradiance in W/m²; `0` when `CTZ < 0` |
-| `Mak` | float | Kasten air mass (pressure-corrected for site altitude) |
-| `GHIargp` | float | Clear-sky GHI from the ARGP model using `ktrp1` (altitude ≤ 1000 m formula or > 1000 m formula, see `getKtrp`) |
+| `Mak` | float | Kasten–Young air mass, pressure-corrected for site altitude |
+| `GHIargp` | float | Clear-sky GHI from the ARGP model using `ktrp` (altitude-dependent, see `getKtrp`) |
 | `GHIargp2` | float | Clear-sky GHI from the ARGP model using `ktrp2 = 0.649 + 0.02·alt^0.28` |
-| `mr` | float | Relative air mass (Reindl formula, pressure-corrected) |
+| `mr` | float | Pressure-corrected air mass using the Kasten formula with SZA in degrees |
 
 ---
 
-## Key Methods
+## Instance Attributes
+
+After construction, the following scalar attributes are available in addition to `.df`:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `ktrp` | float | Clear-sky transmittance computed by `getKtrp()` (altitude-dependent) |
+| `ktrp2` | float | Alternative transmittance: `0.649 + 0.02 × alt^0.28` (always applied, regardless of altitude) |
+
+---
+
+## Methods
 
 All methods below are called internally by `__init__`; they are also available for standalone use.
+
+---
+
+### `getKtrp()` — Altitude-dependent clear-sky transmittance
+
+```python
+Geo.getKtrp() -> float
+```
+
+Returns the clear-sky transmittance coefficient `ktrp` used in the ARGP model. Two branches are applied based on site altitude:
+
+| Condition | Formula |
+|-----------|---------|
+| `alt > 1000 m` | `ktrp = 0.7 + 1.6391×10⁻³ × alt^0.55` |
+| `alt ≤ 1000 m` | `ktrp = 0.7570 + 1.0112×10⁻⁵ × alt^1.1067` |
+
+The result is stored as `self.ktrp` and used by `generateGHIargp`.
+
+**Returns** `float` — the transmittance coefficient.
+
+---
 
 ### `getE(n, y)` — Equation of time
 
@@ -89,14 +121,61 @@ All methods below are called internally by `__init__`; they are also available f
 Geo.getE(n: int, y: int) -> float
 ```
 
-Computes the equation of time in **minutes** using a Fourier series over the day-angle `γ`.
+Computes the equation of time in **minutes** using a Fourier series over the day-angle `γ = 2π(n−1)/365` (or `/366` for leap years):
+
+```
+E = 229.18 × (0.000075 + 0.001868·cos(γ) − 0.032077·sin(γ)
+            − 0.014615·cos(2γ) − 0.040890·sin(2γ))
+```
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `n` | int | Day of year |
-| `y` | int | Four-digit year (used to choose 365 or 366 denominator for leap years) |
+| `y` | int | Four-digit year (determines 365 or 366 denominator for leap years) |
 
 **Returns** `float` — equation of time in minutes.
+
+---
+
+### `Fn(n, y)` — Orbital distance correction factor
+
+```python
+Geo.Fn(n: int, y: int) -> float
+```
+
+Returns the orbital distance correction factor `Fn` using a Fourier series over the day-angle `γ`:
+
+```
+Fn = 1.000110 + 0.034221·cos(γ) + 0.001280·sin(γ)
+             + 0.000719·cos(2γ) + 0.000077·sin(2γ)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `n` | int | Day of year |
+| `y` | int | Four-digit year (determines 365 or 366 denominator for leap years) |
+
+**Returns** `float` — dimensionless orbital correction factor.
+
+---
+
+### `getHS()` — Solar hour
+
+```python
+Geo.getHS() -> pd.Series
+```
+
+Computes the solar hour for every row in `self.df` using the equation of time and the longitude correction:
+
+```
+HS = HR + (4 × (A × 15 × gmt − A × long) + E) / 60
+```
+
+where `A = 1` if `gmt > 0`, `A = −1` if `gmt ≤ 0`.
+
+Takes no arguments; reads `self.df['HR']`, `self.df['E']`, `self.long`, and `self.gmt` directly.
+
+**Returns** `pd.Series` — solar hour values stored in `self.df['HS']`.
 
 ---
 
@@ -106,7 +185,7 @@ Computes the equation of time in **minutes** using a Fourier series over the day
 Geo.delta(n: int, y: int) -> float
 ```
 
-Returns the solar declination in **radians** using a Fourier series approximation (Spencer 1971 / Iqbal form):
+Returns the solar declination in **radians** using a Fourier series approximation:
 
 ```
 δ = 0.006918 − 0.399912·cos(γ) + 0.070257·sin(γ)
@@ -114,7 +193,12 @@ Returns the solar declination in **radians** using a Fourier series approximatio
   − 0.002697·cos(3γ) + 0.001480·sin(3γ)
 ```
 
-**Returns** `float` — declination in radians.
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `n` | int | Day of year |
+| `y` | int | Four-digit year |
+
+**Returns** `float` — solar declination in radians.
 
 ---
 
@@ -173,11 +257,11 @@ Geo.TOA(E0: float, CTZ: float) -> float
 | `E0` | float | Orbital eccentricity correction factor |
 | `CTZ` | float | Cosine of the solar zenith angle |
 
-**Returns** `float` — `0` if `CTZ < 0` (sun below the horizon); otherwise `1361 × E0 × CTZ` W/m².
+**Returns** `float` — `0` when `CTZ < 0` (sun below the horizon); otherwise `1361 × E0 × CTZ` W/m².
 
 ---
 
-### `Mak(CTZ, TZ)` — Kasten air mass (pressure-corrected)
+### `Mak(CTZ, TZ)` — Kasten–Young air mass (pressure-corrected)
 
 ```python
 Geo.Mak(CTZ: float, TZ: float) -> float
@@ -186,42 +270,100 @@ Geo.Mak(CTZ: float, TZ: float) -> float
 Applies the Kasten & Young (1989) formula corrected for site pressure:
 
 ```
-P       = 101355 × (288.15 / (288.15 − 0.0065 × alt))^(−5.255877)
-Amk     = 1 / (CTZ + 0.15 × (93.885 − TZ_deg)^(−1.253))
-Mak     = Amk × (P / 101355)
+P   = 101355 × (288.15 / (288.15 − 0.0065 × alt))^(−5.255877)
+Amk = 1 / (CTZ + 0.15 × (93.885 − TZ)^(−1.253))
+Mak = Amk × (P / 101355)
 ```
 
-where `TZ_deg` is the solar zenith angle in degrees (note: the source passes `TZ` in radians as received from `math.acos`, but the formula's `93.885 − TZ` term treats it numerically — be aware of units when calling standalone).
+<Warning>
+  The `TZ` argument is the solar zenith angle **in radians** (as stored in `self.df['TZ']`). The formula's `93.885 − TZ` term uses the raw radian value numerically — this is consistent with the source code and with how the column is populated. Do not pass degrees.
+</Warning>
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `CTZ` | float | Cosine of the solar zenith angle |
 | `TZ` | float | Solar zenith angle in radians (from `math.acos(CTZ)`) |
 
-**Returns** `float` — pressure-corrected Kasten air mass.
+**Returns** `float` — pressure-corrected Kasten–Young air mass.
 
 ---
 
-### `generateGHIargp(TOA, AM)` — ARGP clear-sky model
+### `generateGHIargp(TOA, AM)` — ARGP clear-sky model (ktrp)
 
 ```python
 Geo.generateGHIargp(TOA: float, AM: float) -> float
 ```
 
-Computes clear-sky GHI using the ARGP (Argentine model):
+Computes clear-sky GHI using the ARGP (Argentine) model with the altitude-dependent `ktrp`:
 
 ```
 GHI_argp = TOA × ktrp^(AM^0.678)
 ```
 
-where `ktrp` is selected by `getKtrp()`:
+`ktrp` is set at construction time by `getKtrp()`:
 
 | Condition | Formula |
 |-----------|---------|
 | `alt > 1000 m` | `ktrp = 0.7 + 1.6391×10⁻³ × alt^0.55` |
 | `alt ≤ 1000 m` | `ktrp = 0.7570 + 1.0112×10⁻⁵ × alt^1.1067` |
 
-**Returns** `float` — clear-sky GHI in W/m² (`0` on any arithmetic exception, e.g. when `TOA = 0`).
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `TOA` | float | Top-of-atmosphere irradiance in W/m² |
+| `AM` | float | Air mass (from `Mak`) |
+
+**Returns** `float` — clear-sky GHI in W/m²; `0` on any arithmetic exception (e.g. when `TOA = 0`).
+
+---
+
+### `generateGHIargp_2(data)` — ARGP clear-sky model (ktrp2)
+
+```python
+Geo.generateGHIargp_2(data: pd.DataFrame) -> list[float]
+```
+
+Computes clear-sky GHI using the ARGP model with the fixed-form transmittance `ktrp2`:
+
+```
+ktrp2       = 0.649 + 0.02 × alt^0.28     (always used, regardless of altitude)
+GHI_argp2   = TOA × ktrp2^(AM^0.678)
+```
+
+Unlike `generateGHIargp`, the `ktrp2` formula does **not** branch on altitude — it is applied uniformly for all sites.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `data` | pd.DataFrame | Must contain `'TOA'` and `'Mak'` columns |
+
+**Returns** `list[float]` — clear-sky GHI values stored in `self.df['GHIargp2']`; `0` for any row where the calculation raises an exception.
+
+---
+
+### `generateMs(CZ, SZA)` — Pressure-corrected air mass (Kasten formula)
+
+```python
+Geo.generateMs(CZ: float, SZA: float) -> float
+```
+
+Computes a pressure-corrected air mass using the Kasten formula with SZA in degrees:
+
+```
+p   = (288.15 / (288.15 − 0.0065 × 1150))^(−5.255877)
+mr  = p × 1 / (cos(SZA°) + (0.48353^0.095846) / (96.741 − SZA)^1.754)
+```
+
+Returns `0` when `SZA ≥ 90°`.
+
+<Warning>
+  `generateMs` uses a **hardcoded altitude of 1150 m** in the pressure calculation instead of `self.altura`. This is a known discrepancy in the source code (`helpers/Geo.py`). If your site altitude differs significantly from 1150 m, the `mr` column will not reflect the actual site pressure. Use `Mak` (which uses `self.altura` correctly) when pressure accuracy matters.
+</Warning>
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `CZ` | float | Cosine of the solar zenith angle (read but not used in the active formula path) |
+| `SZA` | float | Solar zenith angle in **degrees** |
+
+**Returns** `float` — pressure-corrected air mass, or `0` when `SZA ≥ 90°`.
 
 ---
 
@@ -260,16 +402,15 @@ dfGeo = Geo(
     beta=0
 ).df
 
-print(dfGeo[['date', 'SZA', 'TOA', 'CTZ', 'GHIargp']].head())
+print(dfGeo[['date', 'SZA', 'TOA', 'CTZ', 'GHIargp', 'GHIargp2']].head())
 ```
 
-Expected output (first five rows during a pre-sunrise period):
+Expected output (first rows during a pre-sunrise period):
 
 ```
-                 date        SZA  TOA  CTZ  GHIargp
-0 2020-01-01 00:00:00  99.195...  0.0  ...      0.0
-1 2020-01-01 00:01:00  99.181...  0.0  ...      0.0
-...
+                 date    SZA  TOA  CTZ  GHIargp  GHIargp2
+0 2020-01-01 00:00:00  99.2...  0.0  ...      0.0       0.0
+1 2020-01-01 00:01:00  99.1...  0.0  ...      0.0       0.0
 ```
 
 <Tip>

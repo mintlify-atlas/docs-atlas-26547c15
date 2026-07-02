@@ -33,21 +33,21 @@ print(f'Training rMBE before correction: {bias_train:.2f}%')
 
 ## Fitting the Linear Correction
 
-The correction model `Y = a·X + b` is fit using scikit-learn's `LinearRegression`, where `X` is the model output and `Y` is the measured GHI. Training is done **on the training set only** — applying the correction to the same data used to fit it estimates in-sample performance; the real test comes on the held-out test set.
+The correction model `Y = a·X + b` is fit directly with NumPy. `X` is the model output (`GHImod`) and `Y` is the measured GHI. The coefficients are estimated **on the training set only** — applying the correction to the same data used to fit it estimates in-sample performance; the real test comes on the held-out test set.
+
+<Note>
+The workshop uses NumPy for the bias correction fit. The scikit-learn library is not imported in the workshop notebooks. `numpy.polyfit` (or equivalently `scipy.stats.linregress`) is sufficient for this single-predictor linear correction.
+</Note>
 
 ```python
-from sklearn.linear_model import LinearRegression
+import numpy as np
 
-# Reshape model output into a 2-D column vector for sklearn
-XTrain = dfTrain.GHImod.values.reshape(-1, 1)
-yTrain = dfTrain.ghi.values
-
-# Fit linear correction on training data
-reg = LinearRegression().fit(XTrain, yTrain)
+# Fit linear correction on training set
+a, b = np.polyfit(dfTrain['GHImod'].values, dfTrain['ghi'].values, 1)
 
 # Apply to both sets
-yTrainCorregida = reg.predict(XTrain)
-yTestCorregida  = reg.predict(dfTest.GHImod.values.reshape(-1, 1))
+dfTrain['GHIcorr'] = a * dfTrain['GHImod'] + b
+dfTest['GHIcorr']  = a * dfTest['GHImod']  + b
 ```
 
 ---
@@ -60,22 +60,16 @@ Recompute metrics on both sets to measure the impact of the correction. The expe
 # --- Training set ---
 print('--- Training set ---')
 print(f'rRMSD before: {ms.rrmsd(dfTrain.ghi, dfTrain.GHImod):.2f}%')
-print(f'rRMSD after:  {ms.rrmsd(dfTrain.ghi, yTrainCorregida):.2f}%')
+print(f'rRMSD after:  {ms.rrmsd(dfTrain.ghi, dfTrain.GHIcorr):.2f}%')
 print(f'rMBE  before: {ms.rmbe(dfTrain.ghi, dfTrain.GHImod):.2f}%')
-print(f'rMBE  after:  {ms.rmbe(dfTrain.ghi, yTrainCorregida):.2f}%')
+print(f'rMBE  after:  {ms.rmbe(dfTrain.ghi, dfTrain.GHIcorr):.2f}%')
 
 # --- Test set ---
 print('--- Test set ---')
 print(f'rRMSD before: {ms.rrmsd(dfTest.ghi, dfTest.GHImod):.2f}%')
-print(f'rRMSD after:  {ms.rrmsd(dfTest.ghi, yTestCorregida):.2f}%')
+print(f'rRMSD after:  {ms.rrmsd(dfTest.ghi, dfTest.GHIcorr):.2f}%')
 print(f'rMBE  before: {ms.rmbe(dfTest.ghi, dfTest.GHImod):.2f}%')
-print(f'rMBE  after:  {ms.rmbe(dfTest.ghi, yTestCorregida):.2f}%')
-```
-
-Store the corrected predictions back into the test DataFrame for downstream use or plotting:
-
-```python
-dfTest['GHIcorr'] = yTestCorregida
+print(f'rMBE  after:  {ms.rmbe(dfTest.ghi, dfTest.GHIcorr):.2f}%')
 ```
 
 ---

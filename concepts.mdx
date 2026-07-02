@@ -1,7 +1,7 @@
 ---
 title: "Key Concepts: GHI, Solar Geometry, and Time-Series ML"
 sidebarTitle: "Concepts"
-description: "Understand what GHI is, why solar geometry matters for quality control, and how time-series constraints shape ML data preparation."
+description: "Understand what GHI is, why solar geometry matters for quality control, and how time-series structure shapes every ML data preparation step."
 ---
 
 Before diving into the preprocessing pipeline, it helps to understand the physical and mathematical concepts that underpin the quality-control filters and evaluation metrics used throughout this workshop. This page covers the essentials: what GHI is, how solar geometry defines its physical limits, how the clear-sky model works, and what makes time-series data different from ordinary tabular data for Machine Learning.
@@ -130,7 +130,18 @@ df['filtro1'] = np.where(
 ```
 
 <Tip>
-  Any GHI value that exceeds `1.5 × 1361.7 × CTZ^1.2 + 100` while the sun is above the horizon (SZA < 90°) is flagged as non-physical and rejected. This limit is deliberately generous — it allows for brief circumsolar enhancement — but catches clear sensor errors and calibration drift. At night (SZA ≥ 90°), all readings automatically pass `filtro1` regardless of their value; a separate filter (`filtro2`) handles nighttime sign checks instead.
+  Any GHI value that exceeds `1.5 × 1361.7 × CTZ^1.2 + 100` while the sun is above the horizon (SZA < 90°) is flagged as non-physical and rejected. This limit is deliberately generous — it allows for brief circumsolar enhancement — but catches clear sensor errors and calibration drift. At night (SZA ≥ 90°), all readings automatically pass `filtro1` regardless of their value; a separate filter (`filtro2`) checks that nighttime GHI does not exceed a small polynomial threshold derived from the zenith angle `TZ` (in radians):
+
+  ```python
+  df['filtro2'] = np.where(
+      df.SZA > 90,
+      df.ghi > (6.5331 - 0.065502 * df.TZ + 1.8312E-4 * df.TZ ** 2)
+               / (1 + 0.01113 * df.TZ),
+      True
+  )
+  ```
+
+  When the sun is above the horizon (SZA ≤ 90°), all readings pass `filtro2` automatically; the actual nighttime bound is evaluated only when SZA > 90°.
 </Tip>
 
 ---
@@ -215,9 +226,16 @@ def KSI_OVER(Xval, Xest, CDF=0):
 
 ```python
 def SS4(true, pred):
-    rho       = correlation(pred, true)
-    STDRatio  = sigma_est / sigma_med
-    SS4       = ((1 + rho)**4) / (4 * (STDRatio + 1 / STDRatio)**2)
+    x = true
+    y = pred
+    x_bar = np.mean(x)
+    y_bar = np.mean(y)
+    sigma_med = np.sqrt(np.sum((x - x_bar)**2) / len(x))
+    sigma_est = np.sqrt(np.sum((y - y_bar)**2) / len(y))
+    rho = (np.sum((y - y_bar) * (x - x_bar)) / len(x)) / (sigma_est * sigma_med)
+    STDRatio = sigma_est / sigma_med
+    SS4 = ((1 + rho)**4) / (4 * (STDRatio + 1 / STDRatio)**2)
+    return SS4
 ```
 
 SS4 combines correlation and the ratio of standard deviations into a single score bounded between 0 and 1, where 1 indicates a perfect match in both correlation and variability. It is particularly informative for solar data because it rewards models that reproduce the correct spread of GHI values, not just the correct mean.

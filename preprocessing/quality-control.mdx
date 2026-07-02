@@ -35,7 +35,7 @@ The `QC` class (`helpers/QualityControl.py`) applies three independent, physical
 | Filter | Condition | Rule |
 |--------|-----------|------|
 | `filtro1` | SZA \< 90° (daytime) | GHI \< 1.5 × 1361.7 × CTZ^1.2 + 100 (upper physical bound) |
-| `filtro2` | SZA ≥ 90° (nighttime / horizon) | GHI \> (6.5331 − 0.065502×TZ + 1.8312e-4×TZ²) / (1 + 0.01113×TZ) (nighttime minimum) |
+| `filtro2` | SZA > 90° (nighttime) | GHI \> (6.5331 − 0.065502×TZ + 1.8312e-4×TZ²) / (1 + 0.01113×TZ) (nighttime minimum) |
 | `filtro3` | All times | Clearness index kt = GHI/TOA must be in (0, 1.4) |
 | `Acepted` | All times | True only when **all three** filters pass |
 

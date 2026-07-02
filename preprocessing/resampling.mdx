@@ -1,5 +1,5 @@
 ---
-title: "Resampling GHI Time Series from 1-Minute to Hourly Resolution"
+title: "Resampling GHI Time Series to 15-Minute and Hourly"
 sidebarTitle: "Resampling"
 description: "Aggregate cleaned 1-minute GHI data to 15-minute and 60-minute averages, applying minimum-count thresholds to avoid spurious aggregates."
 ---
@@ -21,14 +21,14 @@ The workshop produces two output resolutions:
 import numpy as np
 
 # 15-minute resampling
-counts15 = df.resample(on='datetime', rule='15min').ghi.count().values
-df15 = df.resample(on='datetime', rule='15min')[['ghi']].mean().reset_index()
+counts15 = df.resample(on='datetime', rule="15 min").ghi.count().values
+df15 = df.resample(on='datetime', rule="15 min")[['ghi']].mean().reset_index()
 df15['tot'] = counts15
 df15['ghi'] = np.where(df15.tot > 10, df15.ghi, np.nan)
 
 # 60-minute resampling
-counts60 = df.resample(on='datetime', rule='60min').ghi.count().values
-df60 = df.resample(on='datetime', rule='60min')[['ghi']].mean().reset_index()
+counts60 = df.resample(on='datetime', rule="60 min").ghi.count().values
+df60 = df.resample(on='datetime', rule="60 min")[['ghi']].mean().reset_index()
 df60['tot'] = counts60
 df60['ghi'] = np.where(df60.tot > 40, df60.ghi, np.nan)
 ```
