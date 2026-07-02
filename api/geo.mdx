@@ -1,0 +1,277 @@
+---
+title: "Geo Class: Solar Geometry Calculations"
+sidebarTitle: "Geo"
+description: "API reference for the Geo class — computes solar zenith angle, TOA irradiance, air mass, and clear-sky GHI for any location and time range."
+---
+
+The `Geo` class (in `helpers/Geo.py`) accepts a pandas `DatetimeIndex` and site coordinates, then populates a DataFrame with all relevant solar geometry columns needed for quality control and clear-sky modeling. On construction every column is computed in a single pass over the date range — no further method calls are required to access the results.
+
+---
+
+## Constructor
+
+```python
+Geo(range_dates, lat, long, gmt, alt, beta)
+```
+
+### Parameters
+
+<ParamField path="range_dates" type="pd.DatetimeIndex" required>
+  Date range for which to compute geometry. Typically generated with `pd.date_range(start=..., end=..., freq=...)`.
+</ParamField>
+
+<ParamField path="lat" type="float" required>
+  Site latitude in decimal degrees. Negative values indicate the Southern Hemisphere (e.g. `-22.1` for north-western Argentina).
+</ParamField>
+
+<ParamField path="long" type="float" required>
+  Site longitude in decimal degrees. Negative values indicate west of the Prime Meridian.
+</ParamField>
+
+<ParamField path="gmt" type="int" required>
+  UTC offset of the site (e.g. `0` for UTC, `-3` for Argentina standard time). The constructor uses `abs(gmt)` internally when computing the sign correction for solar hour.
+</ParamField>
+
+<ParamField path="alt" type="float" required>
+  Site altitude in metres above sea level. Used for the air-mass pressure correction and for choosing the `ktrp` branch in the ARGP clear-sky model.
+</ParamField>
+
+<ParamField path="beta" type="float" required>
+  Panel tilt angle in degrees. Pass `0` for a horizontal surface (GHI geometry).
+</ParamField>
+
+### Returns
+
+An instance whose `.df` attribute is a `pd.DataFrame` containing all computed columns described in the table below. The constructor has no additional return value.
+
+---
+
+## Output DataFrame: `Geo.df`
+
+Every row corresponds to one timestamp in `range_dates`. All columns are appended in the order listed.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `date` | datetime | Input timestamp from `range_dates` |
+| `N` | int | Day of year (1–366) |
+| `M` | int | Month (1–12) |
+| `Y` | int | Four-digit year |
+| `E` | float | Equation of time in minutes |
+| `HR` | float | Local clock hour as a decimal (e.g. `13.5` = 13:30) |
+| `HS` | float | Solar hour as a decimal, corrected for longitude and equation of time |
+| `deltaRad` | float | Solar declination in radians |
+| `delta` | float | Solar declination in degrees |
+| `ws` | float | Sunset hour angle in radians: `arccos(−tan(δ)·tan(lat))` |
+| `Fn` | float | Orbital distance correction factor (Fourier series) |
+| `w` | float | Hour angle in degrees: `15 × (12 − HS)` |
+| `wRad` | float | Hour angle in radians |
+| `lat` | float | Site latitude (constant column, repeated for every row) |
+| `CTZ` | float | `cos(θz)` — cosine of the solar zenith angle |
+| `TZ` | float | Solar zenith angle `θz` in radians: `arccos(CTZ)` |
+| `SZA` | float | Solar Zenith Angle in degrees |
+| `alphaS` | float | Solar elevation angle in degrees: `arcsin(CTZ)` in degrees |
+| `E0` | float | Orbital eccentricity correction factor |
+| `TOA` | float | Top-of-atmosphere irradiance in W/m²; `0` when `CTZ < 0` |
+| `Mak` | float | Kasten air mass (pressure-corrected for site altitude) |
+| `GHIargp` | float | Clear-sky GHI from the ARGP model using `ktrp1` (altitude ≤ 1000 m formula or > 1000 m formula, see `getKtrp`) |
+| `GHIargp2` | float | Clear-sky GHI from the ARGP model using `ktrp2 = 0.649 + 0.02·alt^0.28` |
+| `mr` | float | Relative air mass (Reindl formula, pressure-corrected) |
+
+---
+
+## Key Methods
+
+All methods below are called internally by `__init__`; they are also available for standalone use.
+
+### `getE(n, y)` — Equation of time
+
+```python
+Geo.getE(n: int, y: int) -> float
+```
+
+Computes the equation of time in **minutes** using a Fourier series over the day-angle `γ`.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `n` | int | Day of year |
+| `y` | int | Four-digit year (used to choose 365 or 366 denominator for leap years) |
+
+**Returns** `float` — equation of time in minutes.
+
+---
+
+### `delta(n, y)` — Solar declination
+
+```python
+Geo.delta(n: int, y: int) -> float
+```
+
+Returns the solar declination in **radians** using a Fourier series approximation (Spencer 1971 / Iqbal form):
+
+```
+δ = 0.006918 − 0.399912·cos(γ) + 0.070257·sin(γ)
+  − 0.006758·cos(2γ) + 0.000907·sin(2γ)
+  − 0.002697·cos(3γ) + 0.001480·sin(3γ)
+```
+
+**Returns** `float` — declination in radians.
+
+---
+
+### `getCTZ(delta, omega)` — Cosine of solar zenith angle
+
+```python
+Geo.getCTZ(delta: float, omega: float) -> float
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `delta` | float | Solar declination in radians |
+| `omega` | float | Hour angle in radians |
+
+**Returns** `float` — `CTZ = cos(lat)·cos(δ)·cos(ω) + sin(lat)·sin(δ)`.
+
+---
+
+### `getWs(delta)` — Sunset hour angle
+
+```python
+Geo.getWs(delta: float) -> float
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `delta` | float | Solar declination in radians |
+
+**Returns** `float` — sunset hour angle in radians: `ws = arccos(−tan(δ)·tan(lat))`.
+
+---
+
+### `getE0(N, y)` — Orbital eccentricity correction
+
+```python
+Geo.getE0(N: int, y: int) -> float
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `N` | int | Day of year |
+| `y` | int | Four-digit year |
+
+**Returns** `float` — `1 + 0.033·cos(2π·N/365)` (or `/366` for leap years).
+
+---
+
+### `TOA(E0, CTZ)` — Top-of-atmosphere irradiance
+
+```python
+Geo.TOA(E0: float, CTZ: float) -> float
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `E0` | float | Orbital eccentricity correction factor |
+| `CTZ` | float | Cosine of the solar zenith angle |
+
+**Returns** `float` — `0` if `CTZ < 0` (sun below the horizon); otherwise `1361 × E0 × CTZ` W/m².
+
+---
+
+### `Mak(CTZ, TZ)` — Kasten air mass (pressure-corrected)
+
+```python
+Geo.Mak(CTZ: float, TZ: float) -> float
+```
+
+Applies the Kasten & Young (1989) formula corrected for site pressure:
+
+```
+P       = 101355 × (288.15 / (288.15 − 0.0065 × alt))^(−5.255877)
+Amk     = 1 / (CTZ + 0.15 × (93.885 − TZ_deg)^(−1.253))
+Mak     = Amk × (P / 101355)
+```
+
+where `TZ_deg` is the solar zenith angle in degrees (note: the source passes `TZ` in radians as received from `math.acos`, but the formula's `93.885 − TZ` term treats it numerically — be aware of units when calling standalone).
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `CTZ` | float | Cosine of the solar zenith angle |
+| `TZ` | float | Solar zenith angle in radians (from `math.acos(CTZ)`) |
+
+**Returns** `float` — pressure-corrected Kasten air mass.
+
+---
+
+### `generateGHIargp(TOA, AM)` — ARGP clear-sky model
+
+```python
+Geo.generateGHIargp(TOA: float, AM: float) -> float
+```
+
+Computes clear-sky GHI using the ARGP (Argentine model):
+
+```
+GHI_argp = TOA × ktrp^(AM^0.678)
+```
+
+where `ktrp` is selected by `getKtrp()`:
+
+| Condition | Formula |
+|-----------|---------|
+| `alt > 1000 m` | `ktrp = 0.7 + 1.6391×10⁻³ × alt^0.55` |
+| `alt ≤ 1000 m` | `ktrp = 0.7570 + 1.0112×10⁻⁵ × alt^1.1067` |
+
+**Returns** `float` — clear-sky GHI in W/m² (`0` on any arithmetic exception, e.g. when `TOA = 0`).
+
+---
+
+### `to_csv(name)` — Export DataFrame
+
+```python
+Geo.to_csv(name: str) -> None
+```
+
+Saves `self.df` to a CSV file named `name + '.csv'` in the current working directory.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | str | Output file name **without** the `.csv` extension |
+
+---
+
+## Usage Example
+
+```python
+import pandas as pd
+from helpers.Geo import Geo
+
+ranges = pd.date_range(
+    start='2020/01/01 00:00',
+    end='2023/08/31 23:59',
+    freq='1min'
+)
+
+dfGeo = Geo(
+    range_dates=ranges,
+    lat=-22.103936,
+    long=-65.599923,
+    gmt=0,
+    alt=3500,
+    beta=0
+).df
+
+print(dfGeo[['date', 'SZA', 'TOA', 'CTZ', 'GHIargp']].head())
+```
+
+Expected output (first five rows during a pre-sunrise period):
+
+```
+                 date        SZA  TOA  CTZ  GHIargp
+0 2020-01-01 00:00:00  99.195...  0.0  ...      0.0
+1 2020-01-01 00:01:00  99.181...  0.0  ...      0.0
+...
+```
+
+<Tip>
+  For sites in UTC−3 (Argentina), pass `gmt=-3`. The constructor automatically applies the correct sign convention so that solar hours align with local noon.
+</Tip>

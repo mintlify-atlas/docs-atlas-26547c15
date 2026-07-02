@@ -1,0 +1,180 @@
+---
+title: "Loading and Merging Multi-Year GHI Data with Pandas"
+sidebarTitle: "Loading Data"
+description: "Step-by-step guide to reading raw GHI CSV files, renaming columns, parsing timestamps, and building a complete time-indexed DataFrame."
+---
+
+## Loading the Dataset
+
+The raw GHI data for station LQ is spread across four annual CSV files (`GHI_LQ2020.csv` through `GHI_LQ2023.csv`). This guide walks through every step required to combine them into a single, clean, fully time-indexed DataFrame ready for preprocessing.
+
+<Warning>
+  The raw sensor files do **not** always begin at exactly `00:00`. Timestamps may start at `00:01` or later, and duplicates or irregular intervals may exist. Always resample to a regular 1-minute grid and reindex to a complete date range so that gaps in the record are **explicit NaN rows** rather than silent missing timestamps.
+</Warning>
+
+---
+
+<Steps>
+
+<Step title="Import pandas and the Site helper">
+
+Begin by importing the required libraries. The `Site` class from `helpers/Sites.py` provides programmatic access to station metadata (latitude, longitude, altitude).
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+from helpers.Sites import Site
+```
+
+</Step>
+
+<Step title="Instantiate a Site object">
+
+Create a `Site` object for station **LQ**. This gives you the geographic coordinates needed later for solar geometry calculations.
+
+```python
+site = Site('LQ')
+# site.lat   → -22.103936
+# site.long  → -65.599923
+# site.alt   → 3500
+```
+
+`Site('LQ')` looks up the station code in the master list defined in `helpers/Sites.py` and exposes `.lat`, `.long`, and `.alt` as attributes.
+
+</Step>
+
+<Step title="Concatenate the four annual CSV files">
+
+Use `pd.concat` with a list comprehension to load and stack all four years in a single call. The `usecols=[4, 3]` argument selects only the two columns we need:
+
+- **Index 4** → `Fecha` (the timestamp string)
+- **Index 3** → `IRRADIANCIA (W/m2)` (the GHI reading)
+
+```python
+PATH_MEAS = 'measured'
+
+df = pd.concat([
+    pd.read_csv(f'{PATH_MEAS}/GHI_LQ{x}.csv', usecols=[4, 3])
+    for x in range(2020, 2024)
+])
+```
+
+After this step `df` has approximately **1,764,898 rows × 2 columns** (before deduplication) with the original column names `IRRADIANCIA (W/m2)` and `Fecha`.
+
+</Step>
+
+<Step title="Rename the columns">
+
+Rename to shorter, Python-friendly names:
+
+```python
+df.columns = ['ghi', 'datetime']
+```
+
+</Step>
+
+<Step title="Parse the datetime column">
+
+Convert the `datetime` column from its raw string representation to proper `pandas.Timestamp` objects so that all time-based operations work correctly:
+
+```python
+df['datetime'] = pd.to_datetime(df.datetime)
+```
+
+</Step>
+
+<Step title="Drop duplicate timestamps">
+
+The sensor can occasionally record the same minute twice. Remove duplicates while keeping the first occurrence:
+
+```python
+df.drop_duplicates(subset='datetime', inplace=True)
+```
+
+</Step>
+
+<Step title="Resample to a regular 1-minute grid">
+
+Even after deduplication the timestamps may not fall on exact minute boundaries. Resample to a strict 1-minute rule and take the mean within each bin to align everything to a uniform grid:
+
+```python
+df = df.resample(on='datetime', rule='1min').mean().reset_index()
+```
+
+</Step>
+
+<Step title="Reindex to a full date range to make gaps explicit">
+
+Construct a complete minute-by-minute date range covering the entire measurement period and reindex the DataFrame against it. Any minute for which the sensor has no reading will appear as an explicit `NaN` row:
+
+```python
+ranges = pd.date_range(
+    start='2020/01/01 00:00',
+    end='2023/08/31 23:59',
+    freq='1min'
+)
+
+df = df.set_index('datetime').reindex(ranges).rename_axis(['datetime']).reset_index()
+```
+
+After `.reindex(ranges)`, every gap in the sensor record is **visible** as a `NaN` value in the `ghi` column rather than a missing row that would be invisible to downstream analysis.
+
+</Step>
+
+</Steps>
+
+---
+
+## Complete Loading Code
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+from helpers.Sites import Site
+
+PATH_MEAS = 'measured'
+
+# 1. Station metadata
+site = Site('LQ')
+
+# 2. Load and concatenate four years of 1-minute GHI data
+#    usecols=[4, 3] selects: Fecha (col 4) and IRRADIANCIA W/m2 (col 3)
+df = pd.concat([
+    pd.read_csv(f'{PATH_MEAS}/GHI_LQ{x}.csv', usecols=[4, 3])
+    for x in range(2020, 2024)
+])
+
+# 3. Rename to short, Python-friendly column names
+df.columns = ['ghi', 'datetime']
+
+# 4. Parse timestamps
+df['datetime'] = pd.to_datetime(df.datetime)
+
+# 5. Remove duplicate timestamps (keep first)
+df.drop_duplicates(subset='datetime', inplace=True)
+
+# 6. Resample to a strict 1-minute grid
+df = df.resample(on='datetime', rule='1min').mean().reset_index()
+
+# 7. Reindex to a complete range — gaps become explicit NaN rows
+ranges = pd.date_range(
+    start='2020/01/01 00:00',
+    end='2023/08/31 23:59',
+    freq='1min'
+)
+df = df.set_index('datetime').reindex(ranges).rename_axis(['datetime']).reset_index()
+```
+
+---
+
+## Why `.reindex()` Matters
+
+After loading and resampling, the DataFrame only contains rows for timestamps that actually exist in the raw CSV files. If the sensor was offline for an hour, those 60 minutes are simply absent from the data — they are **invisible gaps**.
+
+Calling `.reindex(ranges)` against the full date range inserts `NaN` values for every missing timestamp. This makes every gap **explicit and detectable** by any subsequent step (outlier detection, visualisation, imputation, etc.) instead of being silently skipped.
+
+```python
+# Before reindex: missing timestamps are absent entirely
+# After reindex: missing timestamps appear with ghi = NaN
+print(df['ghi'].isna().sum())   # number of genuinely missing minutes
+```

@@ -1,0 +1,186 @@
+---
+title: "Evaluating GHI Model Performance: MBE, RMSD, KSI, and SS4"
+sidebarTitle: "Metrics"
+description: "Reference for all statistical error metrics in helpers/Metrics.py — from basic bias and error measures to distribution-based KSI, OVER, and the SS4 skill score."
+---
+
+## Overview
+
+The `helpers/Metrics.py` module provides a set of statistical functions to evaluate the performance of GHI models against measured data. Metrics fall into two groups:
+
+- **Point-comparison metrics** — compare model output to observations value-by-value (MBE, MAE, RMSD and their relative variants).
+- **Distribution-comparison metrics** — compare the overall statistical distribution of modelled and observed values (KSI, OVER, SS4).
+
+---
+
+## Point Comparison Metrics
+
+### `mbe(true, pred)` — Mean Bias Error
+
+**Formula:** `sum(pred - true) / N`
+
+Measures the average systematic offset of predictions relative to observations.
+
+- **Positive value** → the model overestimates (positive bias).
+- **Negative value** → the model underestimates (negative bias).
+
+```python
+import helpers.Metrics as ms
+
+bias = ms.mbe(dfTrain.ghi, dfTrain.GHImod)
+print(f'MBE = {bias:.2f} W/m²')
+```
+
+---
+
+### `rmbe(true, pred)` — Relative MBE (%)
+
+**Formula:** `mean(pred - true) / mean(true) × 100`
+
+Expresses the mean bias as a percentage of the mean of the observations. Useful for comparing bias across sites or models with different irradiance levels.
+
+```python
+relative_bias = ms.rmbe(dfTrain.ghi, dfTrain.GHImod)
+print(f'rMBE = {relative_bias:.2f}%')
+```
+
+---
+
+### `mae(true, pred)` — Mean Absolute Error
+
+**Formula:** `sum(|pred - true|) / N`
+
+Average magnitude of errors regardless of direction. Unlike MBE, positive and negative errors do not cancel out.
+
+```python
+error = ms.mae(dfTrain.ghi, dfTrain.GHImod)
+print(f'MAE = {error:.2f} W/m²')
+```
+
+---
+
+### `rmae(true, pred)` — Relative MAE (%)
+
+**Formula:** `MAE / mean(true) × 100`
+
+Mean absolute error expressed as a percentage of the mean of the observations.
+
+```python
+relative_error = ms.rmae(dfTrain.ghi, dfTrain.GHImod)
+print(f'rMAE = {relative_error:.2f}%')
+```
+
+---
+
+### `rmsd(true, pred)` — Root Mean Square Deviation
+
+**Formula:** `sqrt( sum((pred - true)²) / N )`
+
+Penalises large errors more heavily than MAE. Sensitive to outliers and large individual deviations.
+
+```python
+rmsd_val = ms.rmsd(dfTrain.ghi, dfTrain.GHImod)
+print(f'RMSD = {rmsd_val:.2f} W/m²')
+```
+
+---
+
+### `rrmsd(true, pred)` — Relative RMSD (%)
+
+**Formula:** `RMSD / mean(true) × 100`
+
+RMSD expressed as a percentage of the mean of the observations.
+
+```python
+rrmsd_val = ms.rrmsd(dfTrain.ghi, dfTrain.GHImod)
+print(f'rRMSD = {rrmsd_val:.2f}%')
+```
+
+---
+
+## Distribution Comparison Metrics
+
+### `ecdf(x)` — Empirical Cumulative Distribution Function
+
+**Returns:** `(xs, ys)` — sorted values and their cumulative probabilities.
+
+This is a building block used internally by `KSI_OVER`. Call it directly when you want to plot the CDF of a series.
+
+```python
+xs, ys = ms.ecdf(dfTrain.ghi.values)
+# xs: sorted GHI values
+# ys: corresponding cumulative probabilities [0, 1]
+```
+
+---
+
+### `KSI_OVER(Xval, Xest, CDF=0)` — Kolmogorov-Smirnov Integral and OVER
+
+Compares the full empirical CDF of observed values (`Xval`) against the CDF of model estimates (`Xest`).
+
+**KSI** — integral of `|CDF_val - CDF_est|` over the value range. Measures the total distributional difference between observations and model output.
+
+**OVER** — integral of the excess above the critical threshold `Vc = 1.63 / sqrt(N)`. Only areas where the CDF difference exceeds the statistical significance threshold are counted.
+
+**Relative metrics:**
+- `rKSI  = KSI  / (Vc × (Xmax − Xmin))`
+- `rOVER = OVER / (Vc × (Xmax − Xmin))`
+
+**Return values by mode:**
+
+| `CDF` argument | Returns |
+|---|---|
+| `0` (default) | `KSI` scalar only |
+| `1` | `KSI, OVER, rKSI, rOVER, xCDF_tot, CDFval_tot, CDFest_tot, Dn, On, Vc` |
+
+Use `CDF=1` when you need the full CDF arrays for plotting.
+
+```python
+# Default: scalar KSI
+ksi = ms.KSI_OVER(dfTrain.ghi.values, dfTrain.GHImod.values)
+print(f'KSI = {ksi:.4f}')
+
+# Full output for plotting
+ksi, over, rksi, rover, x, cdf_val, cdf_est, dn, on, vc = \
+    ms.KSI_OVER(dfTrain.ghi.values, dfTrain.GHImod.values, CDF=1)
+```
+
+---
+
+### `SS4(true, pred)` — Skill Score
+
+Based on the Beyer/Lorenz SS4 formula. Combines correlation and standard deviation ratio into a single dimensionless score.
+
+**Formula:**
+
+```
+SS4 = ((1 + ρ)⁴) / (4 × (σ_ratio + 1/σ_ratio)²)
+```
+
+Where:
+- `ρ` = Pearson correlation coefficient between `true` and `pred`
+- `σ_ratio = σ_est / σ_med` (standard deviation of estimates divided by standard deviation of measurements)
+
+**Range:** 0 to 1. Higher is better. A perfect model scores 1.0.
+
+```python
+ss = ms.SS4(dfTrain.ghi.values, dfTrain.GHImod.values)
+print(f'SS4 = {ss:.4f}')
+```
+
+---
+
+<Note>
+All metric functions expect **numpy arrays or pandas Series**. Passing a DataFrame directly will raise an error. Extract the column with `.values` (or use the Series directly) before calling any metric function.
+
+```python
+# ✅ Correct — pandas Series
+ms.rmbe(dfTrain.ghi, dfTrain.GHImod)
+
+# ✅ Correct — numpy arrays
+ms.SS4(dfTrain.ghi.values, dfTrain.GHImod.values)
+
+# ❌ Incorrect — DataFrame
+ms.rmbe(dfTrain[['ghi']], dfTrain[['GHImod']])
+```
+</Note>

@@ -1,0 +1,63 @@
+---
+title: "Resampling GHI Time Series from 1-Minute to Hourly Resolution"
+sidebarTitle: "Resampling"
+description: "Aggregate cleaned 1-minute GHI data to 15-minute and 60-minute averages, applying minimum-count thresholds to avoid spurious aggregates."
+---
+
+Once GHI data has been cleaned and quality-controlled, the 1-minute resolution is often too fine-grained for most ML applications. This step aggregates data to coarser temporal resolutions while ensuring that aggregated windows with too few valid readings are discarded.
+
+## Target resolutions
+
+The workshop produces two output resolutions:
+
+| Resolution | Window | Minimum valid readings required |
+|-----------|--------|--------------------------------|
+| 15-minute | 15 possible readings | \> 10 |
+| 60-minute | 60 possible readings | \> 40 |
+
+## Resampling code
+
+```python
+import numpy as np
+
+# 15-minute resampling
+counts15 = df.resample(on='datetime', rule='15min').ghi.count().values
+df15 = df.resample(on='datetime', rule='15min')[['ghi']].mean().reset_index()
+df15['tot'] = counts15
+df15['ghi'] = np.where(df15.tot > 10, df15.ghi, np.nan)
+
+# 60-minute resampling
+counts60 = df.resample(on='datetime', rule='60min').ghi.count().values
+df60 = df.resample(on='datetime', rule='60min')[['ghi']].mean().reset_index()
+df60['tot'] = counts60
+df60['ghi'] = np.where(df60.tot > 40, df60.ghi, np.nan)
+```
+
+## Saving the outputs
+
+```python
+df15 = df15[['datetime', 'ghi']]
+df60 = df60[['datetime', 'ghi']]
+
+df15.to_csv('lq_15.csv', index=False)
+df60.to_csv('lq_60.csv', index=False)
+```
+
+## Why the minimum-count threshold matters
+
+If only 2 out of 60 minutes in a window had valid readings — for example, because a large gap exists in that hour — the hourly mean would be computed from just those 2 points. That result would not fairly represent the hour and should instead be treated as missing data.
+
+The threshold ensures that only windows with sufficient coverage are retained:
+
+- A 15-minute window needs **more than 10** valid 1-minute readings (i.e. at least 11 out of 15).
+- A 60-minute window needs **more than 40** valid 1-minute readings (i.e. at least 41 out of 60).
+
+Windows that fall below the threshold are replaced with `NaN`.
+
+<Note>
+`resample().count()` counts **non-NaN** values. After the QC step — which replaces rejected readings with `NaN` — the count automatically reflects only physically valid measurements, with no additional filtering required.
+</Note>
+
+<Tip>
+Visualize the resampled series to confirm it looks reasonable before using it in an ML pipeline. A quick `plt.plot(df60.datetime, df60.ghi)` will expose any remaining anomalies or unexpected gaps.
+</Tip>

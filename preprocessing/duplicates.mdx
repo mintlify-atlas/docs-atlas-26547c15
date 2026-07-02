@@ -1,0 +1,44 @@
+---
+title: "Removing Duplicate Timestamps from GHI Time Series"
+sidebarTitle: "Duplicates"
+description: "Detect and remove duplicate timestamp entries in GHI sensor data — the first and simplest preprocessing step before any deeper analysis."
+---
+
+The first cleaning step after loading is checking for duplicate timestamps. Raw sensor data often contains multiple readings for the same minute due to logging retries, communication errors, or overlapping exports.
+
+## Detecting duplicates
+
+Compare the total number of non-null rows against the number of unique timestamps to find how many duplicates exist:
+
+```python
+# Total rows vs. unique timestamps
+print(len(df.dropna()))          # e.g. 1764898
+print(len(df.datetime.unique()))  # e.g. 1752120
+print(len(df.dropna()) - len(df.datetime.unique()))  # difference = duplicates
+```
+
+In the workshop dataset (four years of 1-minute GHI readings from site LQ), this reveals **12,778** duplicate entries.
+
+## Removing duplicates
+
+The simplest fix is to drop all but the first occurrence of each duplicated timestamp:
+
+```python
+df.drop_duplicates(subset='datetime', inplace=True)
+# Verify
+print(len(df.dropna()) - len(df.datetime.unique()))  # should be 0
+```
+
+`drop_duplicates` keeps the **first** occurrence by default. If you need to average duplicates instead, use:
+
+```python
+df.resample(on='datetime', rule='1min').mean()
+```
+
+<Tip>
+Always verify deduplication by confirming that `len(df.dropna()) == len(df.datetime.unique())` after the operation.
+</Tip>
+
+## What comes next
+
+Even after deduplication there may be missing timestamps (gaps in the time series). Those are handled by reindexing to a complete date range — see the **Loading Data** page for details.

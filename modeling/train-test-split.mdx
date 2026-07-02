@@ -1,0 +1,49 @@
+---
+title: "Splitting Time-Series Data into Train and Test Sets"
+sidebarTitle: "Train/Test Split"
+description: "How to partition GHI time-series data into training and test sets while respecting temporal ordering — the key constraint for time-series ML."
+---
+
+## Why Temporal Order Matters
+
+For time-series problems, the train/test split must respect temporal order. Unlike tabular data where random shuffling is fine, shuffling a time series **leaks future information into the training set**, leading to overly optimistic evaluation. A model trained on data that includes future samples will appear to perform better than it actually does in production — because it has already "seen" the future.
+
+## The Workshop Strategy
+
+The simplest valid approach used in this workshop is a **year-based split**: use 2020 data as training and 2021–2023 data as test.
+
+```python
+dfTrain = df[df.datetime.dt.year == 2020].dropna()
+dfTest  = df[df.datetime.dt.year > 2020].dropna()
+```
+
+### Why This Works
+
+The entire training set is strictly earlier than the test set — there is no temporal overlap and therefore **no leakage possible**. Every prediction the model makes during evaluation is a genuine out-of-sample forecast.
+
+## Alternative Strategies
+
+The simple year-split above is sufficient for this workshop. More rigorous approaches exist for production systems:
+
+- **Rolling window validation** — a fixed-size window slides forward in time; each window position defines one train/test split.
+- **Walk-forward validation** — the model is retrained at each step as new data arrives, simulating real deployment.
+- **Expanding window** — the training set grows with each step while the test set always starts immediately after the current training endpoint.
+
+These methods produce multiple evaluation scores and give a better picture of how the model generalises across different time periods.
+
+## Inspecting the Splits
+
+After splitting, use `.describe()` on both sets to confirm they have **comparable GHI distributions**. Very different statistics (e.g. a much higher mean in the test set) would signal seasonal imbalance that could skew metric interpretation.
+
+```python
+dfTrain.describe()
+dfTest.describe()
+```
+
+<Warning>
+Never use `train_test_split(shuffle=True)` from scikit-learn on time-series data. Always split by time index. Shuffling randomly mixes past and future samples, making the evaluation meaningless.
+</Warning>
+
+<Note>
+The `dropna()` call ensures only rows with valid (non-NaN) GHI readings are included. NaN values were inserted earlier by QC filters and the resampling threshold step — rows where too few raw measurements contributed to an hourly average are marked as missing and excluded here.
+</Note>

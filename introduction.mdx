@@ -1,0 +1,123 @@
+---
+title: "Get Started with the ML Preprocessing Workshop"
+sidebarTitle: "Introduction"
+description: "Learn how to prepare time-series solar irradiance data for Machine Learning — from raw sensor readings to a clean, model-ready dataset."
+---
+
+Raw sensor data is almost never model-ready. Before any Machine Learning algorithm can learn meaningful patterns from a time-series dataset, the underlying data must be cleaned, validated against physical laws, resampled into a consistent frequency, and split in a way that respects the natural order of time. This workshop walks you through every one of those steps using a real-world dataset of Global Horizontal Irradiance (GHI) measurements collected at a high-altitude solar monitoring station in Argentina.
+
+## Why Preprocessing Matters
+
+The notebook opens with a clear statement of purpose:
+
+> *"El preprocesamiento de datos es una de las etapas más críticas en cualquier proyecto de Machine Learning. Antes de aplicar algoritmos, es fundamental transformar los datos brutos en información lista para el modelado, garantizando calidad, coherencia y utilidad."*
+
+Translated: data preprocessing is one of the most critical stages of any ML project. Before applying algorithms you must transform raw data into information that is ready for modelling — ensuring quality, consistency, and utility.
+
+<Note>
+  The notebook sums this up in a single line that frames the entire workshop: **"El preprocesamiento no es opcional — es esencial."** Preprocessing is not optional — it is essential.
+</Note>
+
+Concretely, good preprocessing delivers five benefits:
+
+| Benefit | Why it matters |
+|---|---|
+| **Improves model quality** | Clean data allows the model to learn from signal, not noise — leading to more accurate predictions |
+| **Reduces overfitting** | Removing noise and non-physical values prevents the model from memorising artefacts that do not generalise |
+| **Enables feature engineering** | A well-structured, regular time-series makes it straightforward to extract temporal patterns such as hour of day, seasonality, and lag features |
+| **Ensures reproducibility** | An ordered, documented pipeline means every team member runs the same transformation steps and gets the same results |
+| **Preserves the temporal component** | Time-series data has an inherent chronological structure; preprocessing must maintain that order so that the model sees a coherent signal |
+
+---
+
+## The 8 Techniques Covered
+
+This workshop covers eight preprocessing techniques in sequence. Together they take the dataset from raw, messy sensor readings all the way to a clean, split, model-ready DataFrame.
+
+<Steps>
+  <Step title="Data Cleaning (Limpieza)">
+    Remove errors and physically impossible values from the raw sensor output — for example, negative irradiance readings recorded during calibration drift, duplicate timestamps from logger restarts, or values that exceed the absolute physical maximum set by solar geometry.
+  </Step>
+  <Step title="Imputation (Imputación)">
+    Fill gaps left by sensor failures, communication losses, or scheduled maintenance. Depending on the gap length and surrounding context, strategies range from forward-fill and linear interpolation to model-based imputation using clear-sky estimates.
+  </Step>
+  <Step title="Outlier Detection and Handling (Outliers)">
+    Identify and correct anomalous readings caused by extreme weather events, temporary sensor obstructions, or equipment faults. Quality-control filters derived from solar geometry — such as the clearness index `kt` and the TOA upper bound — are used to flag non-physical outliers objectively.
+  </Step>
+  <Step title="Resampling">
+    Adjust the temporal frequency of the dataset to match the resolution required by the downstream model. Raw data from the station arrives at one-minute resolution; resampling aggregates it to consistent hourly or sub-hourly intervals and handles irregular or missing timestamps.
+  </Step>
+  <Step title="Smoothing (Suavizado)">
+    Apply rolling-window or exponential smoothing to reduce high-frequency noise that is not representative of the underlying physical phenomenon, while preserving the diurnal cycle and longer-term trends that the model needs to learn.
+  </Step>
+  <Step title="Normalisation and Standardisation (Normalización)">
+    Scale the feature values so that no single variable dominates the loss function due to its unit or magnitude. Common approaches covered include min-max normalisation and z-score standardisation, chosen based on the algorithm and the physical range of the variable.
+  </Step>
+  <Step title="Temporal Feature Engineering (Features temporales)">
+    Extract rich time-based features from the datetime index — hour of day, day of year, month, solar declination, and cyclical encodings — that give the model the context it needs to learn diurnal and seasonal patterns.
+  </Step>
+  <Step title="Proper Train/Test Split (División de datos)">
+    Divide the dataset into training and test sets in a way that **respects temporal ordering**. Unlike tabular data, a random shuffle would leak future information into the training set; instead the split is made at a fixed point in time, or uses a walk-forward validation scheme.
+  </Step>
+</Steps>
+
+---
+
+## The Case Study: Station LQ
+
+All techniques are demonstrated on a single, concrete dataset so you can follow every transformation from start to finish.
+
+The dataset comes from solar monitoring station **LQ**, located in a high-altitude region of northwest Argentina:
+
+| Property | Value |
+|---|---|
+| **Station code** | LQ |
+| **Latitude** | -22.103936 ° |
+| **Longitude** | -65.599923 ° |
+| **Altitude** | 3500 m above sea level |
+| **Years covered** | 2020 – 2023 |
+| **Native resolution** | 1 minute |
+| **Measured variable** | GHI — Global Horizontal Irradiance (W/m²) |
+
+Four annual CSV files (`GHI_LQ2020.csv` through `GHI_LQ2023.csv`) are concatenated into a single DataFrame at the start of the notebook:
+
+```python
+from helpers.Sites import Site
+
+site = Site('LQ')
+df = pd.concat([
+    pd.read_csv(f'measured/GHI_LQ{x}.csv', usecols=[4, 3])
+    for x in range(2020, 2024)
+])
+df.columns = ['ghi', 'datetime']
+```
+
+This gives you a raw DataFrame with two columns — `ghi` (irradiance in W/m²) and `datetime` — spanning over 2 million one-minute readings across four years.
+
+---
+
+## Common Issues in Real GHI Data
+
+Real-world solar irradiance measurements are far from clean. The notebook identifies five categories of data quality problems that this workshop addresses:
+
+- **Missing values** — caused by sensor failures, scheduled maintenance, power outages, or communication dropouts between the logger and the data server.
+- **Outliers** — anomalous spikes or dips due to extreme weather conditions, temporary obstructions (birds, dust, snow), or sudden sensor malfunctions.
+- **Noise** — high-frequency variability that is not physically meaningful, for instance rapid fluctuations caused by electronic interference rather than actual cloud cover changes.
+- **Irregular frequencies** — timestamps that are not evenly spaced because the logger skipped intervals, recorded duplicates, or drifted in its internal clock.
+- **Non-physical values** — readings that violate solar geometry, such as negative irradiance (impossible when the sensor is correctly zeroed) or values above the theoretical maximum set by the Top of Atmosphere irradiance and local solar angle.
+
+---
+
+## What's Next
+
+<CardGroup cols={3}>
+  <Card title="Key Concepts" icon="book-open" href="concepts">
+    Understand GHI, solar geometry, the clear-sky model, and why time-series structure shapes every preprocessing decision.
+  </Card>
+  <Card title="Dataset Overview" icon="database" href="dataset/overview">
+    Explore the structure of the LQ station dataset — columns, date range, native resolution, and a first look at the raw signal.
+  </Card>
+  <Card title="Removing Duplicates" icon="copy" href="preprocessing/duplicates">
+    Start preprocessing: detect and remove duplicate timestamps that arise from logger restarts and data concatenation.
+  </Card>
+</CardGroup>

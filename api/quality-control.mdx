@@ -1,0 +1,125 @@
+---
+title: "QC Class: Physical Quality Control Filters"
+sidebarTitle: "QualityControl"
+description: "API reference for the QC class — applies three physics-based filters to a GHI DataFrame using solar zenith angle and top-of-atmosphere irradiance."
+---
+
+The `QC` class (in `helpers/QualityControl.py`) modifies a GHI DataFrame **in place**, appending flag columns and a final `Acepted` boolean column. Three physical plausibility filters are applied sequentially — one upper-bound check during daytime, one nighttime leakage check, and one clearness-index range check. Only rows passing all three are marked as accepted.
+
+---
+
+## Constructor
+
+```python
+QC(df)
+```
+
+### Parameters
+
+<ParamField path="df" type="pd.DataFrame" required>
+  A pandas DataFrame that **must** already contain the following columns:
+
+  | Column | Source | Description |
+  |--------|--------|-------------|
+  | `ghi` | raw data | Measured global horizontal irradiance (W/m²) |
+  | `SZA` | `Geo.df` | Solar Zenith Angle in degrees |
+  | `CTZ` | `Geo.df` | Cosine of the solar zenith angle |
+  | `TZ` | `Geo.df` | Solar zenith angle in **radians** |
+  | `TOA` | `Geo.df` | Top-of-atmosphere irradiance (W/m²) |
+
+  Typically built by merging raw GHI measurements with the output of `Geo(...).df` on the `date` column.
+</ParamField>
+
+### Side effects — columns added to `df`
+
+The constructor returns no value; it modifies `df` in place by appending the columns below.
+
+| Column added | Type | Description |
+|---|---|---|
+| `filtro1` | bool | **Upper bound (daytime):** when `SZA < 90°`, flags `True` if `ghi < 1.5 × 1361.7 × CTZ^1.2 + 100`; passes through `True` when `SZA ≥ 90°` (nighttime rows are not penalised by this filter). |
+| `filtro2` | bool | **Nighttime lower bound:** when `SZA ≥ 90°`, flags `True` if `ghi > (6.5331 − 0.065502×TZ + 1.8312×10⁻⁴×TZ²) / (1 + 0.01113×TZ)`; passes through `True` during daytime. |
+| `kt` | float | **Clearness index:** `ghi / TOA` when `TOA > 0`; `0` otherwise. |
+| `filtro3` | bool | **Clearness index bound:** `True` when `0 < kt < 1.4`. |
+| `Acepted` | bool | `True` when `filtro1 AND filtro2 AND filtro3` all pass simultaneously. |
+
+---
+
+## Filter Logic Detail
+
+### Filter 1 — Physically Possible Upper Limit (BSRN)
+
+```
+When SZA < 90°:  ghi < 1.5 × 1361.7 × CTZ^1.2 + 100
+When SZA ≥ 90°:  always True
+```
+
+Rejects readings that exceed the theoretical upper bound for GHI at a given solar angle, following the BSRN (Baseline Surface Radiation Network) quality-control convention.
+
+### Filter 2 — Nighttime Leakage
+
+```
+When SZA ≥ 90°:  ghi > f(TZ)
+  where f(TZ) = (6.5331 − 0.065502×TZ + 1.8312×10⁻⁴×TZ²) / (1 + 0.01113×TZ)
+When SZA < 90°:  always True
+```
+
+Catches sensor dark-current offsets or calibration drift that produce spurious positive readings at night.
+
+### Filter 3 — Clearness Index Range
+
+```
+kt = ghi / TOA    (0 when TOA = 0)
+True when 0 < kt < 1.4
+```
+
+A clearness index outside the physically meaningful range `(0, 1.4)` indicates either a negative reading, a zero reading during daytime, or an unrealistically high value.
+
+---
+
+## Usage Example
+
+```python
+import numpy as np
+import pandas as pd
+from helpers.Geo import Geo
+from helpers.QualityControl import QC
+
+# --- Build solar geometry ---
+ranges = pd.date_range(
+    start='2022/01/01 00:00',
+    end='2022/12/31 23:59',
+    freq='1min'
+)
+
+dfGeo = Geo(
+    range_dates=ranges,
+    lat=-24.7288,
+    long=-65.4095,
+    gmt=0,
+    alt=1233,
+    beta=0
+).df
+
+# --- Merge with your measured GHI ---
+# df_raw must have a 'date' and 'ghi' column
+df = df_raw.merge(dfGeo[['date', 'SZA', 'CTZ', 'TZ', 'TOA']], on='date')
+
+# --- Apply quality control ---
+QC(df)
+
+# --- Replace rejected readings with NaN ---
+df['ghi'] = np.where(df.Acepted, df.ghi, np.nan)
+
+print(f"Accepted: {df.Acepted.sum()} / {len(df)}")
+print(df[['date', 'ghi', 'kt', 'filtro1', 'filtro2', 'filtro3', 'Acepted']].head(10))
+```
+
+---
+
+<Warning>
+  The `QC` class uses the `TZ` column from `Geo.df`, which contains the solar zenith angle **in radians** (not degrees). Do **not** pass the `SZA` column (degrees) in place of `TZ` — the nighttime filter formula (`filtro2`) will produce incorrect thresholds.
+</Warning>
+
+<Note>
+  `Acepted` uses the Spanish spelling (one `c`) as defined in the source. Use `df['Acepted']` — not `df['Accepted']` — when accessing the column.
+</Note>

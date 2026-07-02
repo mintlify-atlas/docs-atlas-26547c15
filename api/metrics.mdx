@@ -1,0 +1,266 @@
+---
+title: "Metrics Module: Error and Skill Score Functions"
+sidebarTitle: "Metrics"
+description: "API reference for helpers/Metrics.py — point-comparison metrics (MBE, MAE, RMSD) and distribution metrics (KSI, OVER, SS4) for GHI model evaluation."
+---
+
+The `helpers/Metrics.py` module provides standalone functions (no class) for evaluating GHI model accuracy. All functions accept numpy arrays or pandas Series. Import the module under an alias for concise notation:
+
+```python
+import helpers.Metrics as ms
+```
+
+---
+
+## Point Comparison Functions
+
+These functions operate element-wise on paired arrays of measured (`true`) and modelled (`pred`) values of equal length.
+
+### `mbe(true, pred)` → float
+
+**Mean Bias Error**
+
+```python
+ms.mbe(true: array-like, pred: array-like) -> float
+```
+
+```
+MBE = Σ(pred − true) / N
+```
+
+A positive result means the model systematically **overestimates**; a negative result indicates underestimation.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `true` | array-like | Measured (reference) values |
+| `pred` | array-like | Modelled (estimated) values |
+
+**Returns** `float` — mean bias error in the same units as the input.
+
+---
+
+### `rmbe(true, pred)` → float
+
+**Relative Mean Bias Error (%)**
+
+```python
+ms.rmbe(true: array-like, pred: array-like) -> float
+```
+
+```
+rMBE = mean(pred − true) / mean(true) × 100
+```
+
+**Returns** `float` — relative MBE as a percentage.
+
+---
+
+### `mae(true, pred)` → float
+
+**Mean Absolute Error**
+
+```python
+ms.mae(true: array-like, pred: array-like) -> float
+```
+
+```
+MAE = Σ|pred − true| / N
+```
+
+**Returns** `float` — mean absolute error in the same units as the input.
+
+---
+
+### `rmae(true, pred)` → float
+
+**Relative Mean Absolute Error (%)**
+
+```python
+ms.rmae(true: array-like, pred: array-like) -> float
+```
+
+```
+rMAE = MAE / mean(true) × 100
+```
+
+**Returns** `float` — relative MAE as a percentage.
+
+---
+
+### `rmsd(true, pred)` → float
+
+**Root Mean Square Deviation**
+
+```python
+ms.rmsd(true: array-like, pred: array-like) -> float
+```
+
+```
+RMSD = sqrt( Σ(pred − true)² / N )
+```
+
+**Returns** `float` — RMSD in the same units as the input.
+
+---
+
+### `rrmsd(true, pred)` → float
+
+**Relative Root Mean Square Deviation (%)**
+
+```python
+ms.rrmsd(true: array-like, pred: array-like) -> float
+```
+
+```
+rRMSD = RMSD / mean(true) × 100
+```
+
+**Returns** `float` — relative RMSD as a percentage.
+
+---
+
+## Distribution Comparison Functions
+
+These functions compare the **statistical distributions** of two samples rather than paired point differences.
+
+### `ecdf(x)` → tuple
+
+**Empirical Cumulative Distribution Function**
+
+```python
+ms.ecdf(x: array-like) -> tuple[np.ndarray, np.ndarray]
+```
+
+Computes the empirical CDF of a 1-D sample.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `x` | array-like | Input sample |
+
+**Returns** `(xs, ys)` where:
+- `xs` — sorted values of `x` (`np.ndarray`)
+- `ys` — cumulative probabilities in `[0, 1]` (`np.ndarray`), computed as `arange(1, N+1) / N`
+
+---
+
+### `KSI_OVER(Xval, Xest, CDF=0)`
+
+**Kolmogorov-Smirnov Integral (KSI) and OVER metric**
+
+```python
+ms.KSI_OVER(
+    Xval: array-like,
+    Xest: array-like,
+    CDF: int = 0
+) -> float | tuple
+```
+
+Computes the area-based KS integral and the OVER metric between two empirical distributions, following the method of Beyer et al.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `Xval` | array-like | — | Measured values |
+| `Xest` | array-like | — | Estimated (model) values |
+| `CDF` | int | `0` | Output selector: `0` returns KSI only; `1` returns the full tuple |
+
+**Critical threshold:**
+
+```
+Vc = 1.63 / sqrt(N)
+```
+
+where `N = len(Xval)`.
+
+**Internal quantities:**
+
+| Symbol | Description |
+|--------|-------------|
+| `Dn` | Point-wise absolute difference between the two CDFs on the union grid |
+| `On` | Excess above the critical threshold: `(Dn − Vc)` where `Dn > Vc`, else `0` |
+| `KSI` | `∫ Dn dx` (trapezoidal integration over the union x-axis) |
+| `OVER` | `∫ On dx` |
+| `rKSI` | `KSI / (Vc × (Xmax − Xmin))` — relative KSI |
+| `rOVER` | `OVER / (Vc × (Xmax − Xmin))` — relative OVER |
+
+**Returns:**
+
+- When `CDF=0` (default): `float` — KSI value only.
+- When `CDF=1`: `tuple` of ten elements:
+  ```
+  (KSI, OVER, rKSI, rOVER, xCDF_tot, CDFval_tot, CDFest_tot, Dn, On, Vc)
+  ```
+
+<Note>
+  If `len(Xval) ≠ len(Xest)`, the function prints a warning: *"longitudes diferentes, valores relativos no validos"* (different lengths, relative values not valid). KSI is still returned but relative metrics (`rKSI`, `rOVER`) may be unreliable.
+</Note>
+
+---
+
+### `SS4(true, pred)` → float
+
+**Beyer / Lorenz Skill Score**
+
+```python
+ms.SS4(true: array-like, pred: array-like) -> float
+```
+
+A composite skill score that combines Pearson correlation and the ratio of standard deviations:
+
+```
+σ_med   = std(true)        (population std)
+σ_est   = std(pred)        (population std)
+ρ       = Pearson correlation(true, pred)
+σ_ratio = σ_est / σ_med
+
+SS4 = (1 + ρ)⁴ / (4 × (σ_ratio + 1/σ_ratio)²)
+```
+
+**Range:** `[0, 1]`. A perfect model (ρ = 1, σ_ratio = 1) yields `SS4 = 1`.
+
+**Returns** `float` — skill score.
+
+---
+
+## Quick Reference Usage
+
+```python
+import helpers.Metrics as ms
+import numpy as np
+
+true = df_test['ghi'].values
+pred = df_test['GHImod'].values
+
+# --- Point metrics ---
+print(f"MBE   = {ms.mbe(true, pred):.2f} W/m²")
+print(f"rMBE  = {ms.rmbe(true, pred):.2f} %")
+print(f"MAE   = {ms.mae(true, pred):.2f} W/m²")
+print(f"rMAE  = {ms.rmae(true, pred):.2f} %")
+print(f"RMSD  = {ms.rmsd(true, pred):.2f} W/m²")
+print(f"rRMSD = {ms.rrmsd(true, pred):.2f} %")
+
+# --- Distribution metrics ---
+print(f"KSI   = {ms.KSI_OVER(true, pred):.4f}")
+print(f"SS4   = {ms.SS4(true, pred):.4f}")
+
+# --- Full KSI output for plotting CDFs ---
+ksi, over, rksi, rover, x, cdf_val, cdf_est, dn, on, vc = ms.KSI_OVER(
+    true, pred, CDF=1
+)
+print(f"KSI={ksi:.4f}  OVER={over:.4f}  rKSI={rksi:.4f}  rOVER={rover:.4f}")
+```
+
+---
+
+## Function Summary Table
+
+| Function | Returns | Formula |
+|----------|---------|---------|
+| `mbe` | float (W/m²) | `Σ(pred−true)/N` |
+| `rmbe` | float (%) | `mean(pred−true)/mean(true)×100` |
+| `mae` | float (W/m²) | `Σ\|pred−true\|/N` |
+| `rmae` | float (%) | `MAE/mean(true)×100` |
+| `rmsd` | float (W/m²) | `sqrt(Σ(pred−true)²/N)` |
+| `rrmsd` | float (%) | `RMSD/mean(true)×100` |
+| `ecdf` | `(xs, ys)` | Empirical CDF |
+| `KSI_OVER` | float or tuple | KS integral / OVER |
+| `SS4` | float [0–1] | Beyer skill score |

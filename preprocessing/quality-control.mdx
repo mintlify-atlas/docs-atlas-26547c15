@@ -1,0 +1,61 @@
+---
+title: "Physical Quality Control Filters for Solar Irradiance Data"
+sidebarTitle: "Quality Control"
+description: "Apply physically-motivated QC filters using solar geometry to flag GHI readings that are physically impossible or statistically improbable."
+---
+
+After removing duplicates, apply rigorous physics-based filters. Unlike simple range checks, these filters use the **Solar Zenith Angle (SZA)** and the **theoretical top-of-atmosphere irradiance (TOA)** — computed for each timestamp — as the reference frame for what is physically possible.
+
+## Computing solar geometry with the Geo helper
+
+Before running QC, you need to enrich the DataFrame with solar geometry columns. The `Geo` class computes these from the site's geographic coordinates and the timestamps:
+
+```python
+from helpers.Geo import Geo
+
+dfGeo = Geo(
+    range_dates=df.datetime,
+    lat=site.lat,
+    long=site.long,
+    alt=site.alt,
+    gmt=0,
+    beta=0
+).df
+
+df['SZA'] = dfGeo.SZA.values   # Solar Zenith Angle in degrees
+df['TOA'] = dfGeo.TOA.values   # Top-of-atmosphere irradiance W/m²
+df['CTZ'] = dfGeo.CTZ.values   # cos(SZA)
+df['TZ']  = dfGeo.TZ.values    # SZA in radians
+```
+
+## The QC filters
+
+The `QC` class (`helpers/QualityControl.py`) applies three independent, physically-motivated filters:
+
+| Filter | Condition | Rule |
+|--------|-----------|------|
+| `filtro1` | SZA \< 90° (daytime) | GHI \< 1.5 × 1361.7 × CTZ^1.2 + 100 (upper physical bound) |
+| `filtro2` | SZA ≥ 90° (nighttime / horizon) | GHI \> (6.5331 − 0.065502×TZ + 1.8312e-4×TZ²) / (1 + 0.01113×TZ) (nighttime minimum) |
+| `filtro3` | All times | Clearness index kt = GHI/TOA must be in (0, 1.4) |
+| `Acepted` | All times | True only when **all three** filters pass |
+
+## Applying QC and masking rejected values
+
+```python
+from helpers.QualityControl import QC
+
+QC(df)  # adds filtro1, filtro2, filtro3, kt, Acepted columns in-place
+
+import numpy as np
+df['ghi'] = np.where(df.Acepted, df.ghi, np.nan)
+```
+
+Readings that fail any filter are replaced with `NaN`, preserving the timestamp index for later resampling.
+
+<Note>
+`QC` modifies `df` **in place**, adding five new columns: `filtro1`, `filtro2`, `filtro3`, `kt`, and `Acepted`.
+</Note>
+
+<Warning>
+The QC filters require the `SZA`, `TOA`, `CTZ`, and `TZ` columns — computed by the `Geo` helper — to already be present in the DataFrame before calling `QC(df)`.
+</Warning>

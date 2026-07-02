@@ -1,0 +1,82 @@
+---
+title: "Measurement Stations: South American GHI Network"
+sidebarTitle: "Stations"
+description: "Reference for all 16 solar irradiance measurement stations in the network, including geographic coordinates and altitude."
+---
+
+## Station Network
+
+The workshop uses a network of **16 meteorological stations** spread across South America, spanning a wide range of climatic regimes — from coastal lowlands to high-altitude Andean plateaus. The `Site` class in `helpers/Sites.py` provides programmatic access to each station's geographic metadata.
+
+---
+
+## Station Reference Table
+
+| Code | Latitude (°) | Longitude (°) | Altitude (m) |
+|------|-------------|--------------|-------------|
+| PAR  | 5.8060      | -55.2146     | 4           |
+| FLO  | -27.6047    | -48.5227     | 11          |
+| BSA  | -34.6       | -58.48       | 30          |
+| PIL  | -31.67      | -63.88       | 335         |
+| PTR  | -9.0690     | -40.3200     | 387         |
+| YU   | -23.5844    | -64.5066     | 401         |
+| BRB  | -15.6010    | -47.7130     | 1023        |
+| SA   | -24.7288    | -65.4095     | 1233        |
+| CE   | -24.89438   | -65.47105    | 1235        |
+| SCA  | -25.8951    | -65.925      | 1624        |
+| ERO  | -24.39278   | -65.76806    | 3355        |
+| AP   | -22.80205   | -65.82436    | 3459        |
+| **LQ** | **-22.103936** | **-65.599923** | **3500** |
+| TG   | -24.59      | -67.40       | 3560        |
+| ERI  | -23.9736    | -67.1156     | 3729        |
+| CAU  | -23.668466  | -66.744995   | 3915        |
+
+> **Primary case study station** — The workshop focuses on station **LQ** (La Quiaca area, Argentina), one of the highest-altitude stations in the network at **3,500 m a.s.l.** High-altitude sites experience significantly reduced atmospheric attenuation, making them particularly interesting for solar resource assessment and ML-based quality control.
+
+---
+
+## Using the `Site` Class
+
+The `Site` class lives in `helpers/Sites.py`. Instantiate it with a station code string to get instant access to the metadata:
+
+```python
+from helpers.Sites import Site
+
+# Instantiate with the station code
+site = Site('LQ')
+
+# Access geographic attributes
+print(site.lat, site.long, site.alt)
+# → -22.103936 -65.599923 3500
+
+# Print a human-readable summary
+site.describe()
+# → Site LQ
+# → lat -22.103936, long -65.599923, alt 3500
+```
+
+The `Site` object is used throughout the workshop notebooks to supply the exact coordinates required by solar geometry calculations (solar zenith angle, hour angle, etc.) and to index into the modeled reference data for the corresponding station.
+
+---
+
+## How `Site` Works Internally
+
+Inside `helpers/Sites.py`, three parallel lists define the complete network:
+
+```python
+sites = ['PAR', 'FLO', 'BSA', 'PIL', 'PTR', 'YU', 'BRB',
+         'SA',  'SCA', 'ERO', 'LQ',  'TG',  'ERI', 'CAU', 'CE', 'AP']
+
+lats  = [5.8060, -27.6047, -34.6, -31.67, -9.0690, -23.5844, -15.6010,
+         -24.7288, -25.8951, -24.39278, -22.103936, -24.59, -23.9736,
+         -23.668466, -24.89438, -22.80205]
+
+lons  = [-55.2146, -48.5227, -58.48, -63.88, -40.3200, -64.5066, -47.7130,
+         -65.4095, -65.925, -65.76806, -65.599923, -67.40, -67.1156,
+         -66.744995, -65.47105, -65.82436]
+
+alts  = [4, 11, 30, 335, 387, 401, 1023, 1233, 1624, 3355,
+         3500, 3560, 3729, 3915, 1235, 3459]
+```
+
+When you call `Site('LQ')`, the constructor locates the index of `'LQ'` in the `sites` list and reads the corresponding latitude, longitude, and altitude from the matching positions in `lats`, `lons`, and `alts`.

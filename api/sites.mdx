@@ -1,0 +1,149 @@
+---
+title: "Site Class: Measurement Station Metadata"
+sidebarTitle: "Sites"
+description: "API reference for helpers/Sites.py — the Site class provides latitude, longitude, and altitude for 16 South American GHI measurement stations."
+---
+
+The `Site` class (in `helpers/Sites.py`) is a simple lookup wrapper for a hardcoded registry of 16 solar irradiance measurement stations across South America. Instantiate it with a station code to immediately access that station's geographic coordinates and altitude.
+
+---
+
+## Constructor
+
+```python
+Site(cod)
+```
+
+### Parameters
+
+<ParamField path="cod" type="str" required>
+  Station code string. Must be one of the 16 registered codes:
+
+  `'PAR'`, `'FLO'`, `'BSA'`, `'PIL'`, `'PTR'`, `'YU'`, `'BRB'`, `'SA'`, `'SCA'`, `'ERO'`, `'LQ'`, `'TG'`, `'ERI'`, `'CAU'`, `'CE'`, `'AP'`
+
+  Raises `ValueError` if the code is not found in the internal registry.
+</ParamField>
+
+### Instance Attributes
+
+After construction, the following attributes are available:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `cod` | str | Station code passed to the constructor |
+| `lat` | float | Latitude in decimal degrees (negative = Southern Hemisphere) |
+| `long` | float | Longitude in decimal degrees (negative = west of Prime Meridian) |
+| `alt` | float | Altitude in metres above sea level |
+| `idx` | int | Zero-based index position of the station in the internal registry list |
+
+---
+
+## Methods
+
+### `describe()` → None
+
+```python
+site.describe() -> None
+```
+
+Prints a human-readable summary of the station to stdout:
+
+```
+Site <cod>
+lat <lat>, long <long>, alt <alt>
+```
+
+No parameters. No return value.
+
+---
+
+### `getNeighbors(order)` → list[str]
+
+```python
+site.getNeighbors(order: int) -> list[str]
+```
+
+Returns a list of grid-point identifiers at Manhattan distance `order` from the station's reference grid position. Each identifier is formatted as `'{lat}_{lon}'` with coordinates rounded to 5 decimal places.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `order` | int | Manhattan distance `k` from the station. `k=1` returns immediate neighbours, `k=2` the next ring, and so on. |
+
+**Returns** `list[str]` — grid-point strings in the form `'{lat}_{lon}'`, using a `0.1°` resolution grid.
+
+<Warning>
+  `getNeighbors` relies on `lats_init` and `lons_init` reference coordinates that are **commented out** in the current version of `helpers/Sites.py`. Calling this method on any `Site` instance will raise a `NameError`. The method signature is documented here for completeness; enable it by uncommenting the reference arrays in the source.
+</Warning>
+
+---
+
+## Usage Example
+
+```python
+from helpers.Sites import Site
+
+site = Site('LQ')
+
+print(site.lat)    # -22.103936
+print(site.long)   # -65.599923
+print(site.alt)    # 3500
+print(site.idx)    # 10
+
+site.describe()
+# Site LQ
+# lat -22.103936, long -65.599923, alt 3500
+```
+
+Pass the coordinates directly into `Geo` and other helpers:
+
+```python
+import pandas as pd
+from helpers.Sites import Site
+from helpers.Geo import Geo
+
+s = Site('SA')
+
+ranges = pd.date_range(
+    start='2022/01/01 00:00',
+    end='2022/12/31 23:59',
+    freq='1min'
+)
+
+dfGeo = Geo(
+    range_dates=ranges,
+    lat=s.lat,
+    long=s.long,
+    gmt=0,
+    alt=s.alt,
+    beta=0
+).df
+```
+
+---
+
+## Station Registry
+
+All 16 stations registered in `helpers/Sites.py`:
+
+| Code | Latitude | Longitude | Altitude (m) |
+|------|----------|-----------|--------------|
+| PAR | 5.80600 | −55.21460 | 4 |
+| FLO | −27.60470 | −48.52270 | 11 |
+| BSA | −34.60000 | −58.48000 | 30 |
+| PIL | −31.67000 | −63.88000 | 335 |
+| PTR | −9.06900 | −40.32000 | 387 |
+| YU | −23.58440 | −64.50660 | 401 |
+| BRB | −15.60100 | −47.71300 | 1023 |
+| SA | −24.72880 | −65.40950 | 1233 |
+| SCA | −25.89510 | −65.92500 | 1624 |
+| ERO | −24.39278 | −65.76806 | 3355 |
+| LQ | −22.103936 | −65.599923 | 3500 |
+| TG | −24.59000 | −67.40000 | 3560 |
+| ERI | −23.97360 | −67.11560 | 3729 |
+| CAU | −23.668466 | −66.744995 | 3915 |
+| CE | −24.89438 | −65.47105 | 1235 |
+| AP | −22.80205 | −65.82436 | 3459 |
+
+<Note>
+  Stations are stored in module-level lists (`sites`, `lats`, `lons`, `alts`) indexed in the order shown above. The `Site.idx` attribute gives the zero-based position in these lists, which can be useful for vectorised operations across the full registry.
+</Note>

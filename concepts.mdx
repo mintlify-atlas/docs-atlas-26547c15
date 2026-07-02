@@ -1,0 +1,223 @@
+---
+title: "Key Concepts: GHI, Solar Geometry, and Time-Series ML"
+sidebarTitle: "Concepts"
+description: "Understand what GHI is, why solar geometry matters for quality control, and how time-series constraints shape ML data preparation."
+---
+
+Before diving into the preprocessing pipeline, it helps to understand the physical and mathematical concepts that underpin the quality-control filters and evaluation metrics used throughout this workshop. This page covers the essentials: what GHI is, how solar geometry defines its physical limits, how the clear-sky model works, and what makes time-series data different from ordinary tabular data for Machine Learning.
+
+---
+
+## Global Horizontal Irradiance (GHI)
+
+**GHI** — Global Horizontal Irradiance — is the total solar radiation received on a horizontal surface at ground level, expressed in **W/m²**. It combines:
+
+- **Direct normal irradiance (DNI)** — the beam component coming straight from the solar disk, projected onto the horizontal plane.
+- **Diffuse horizontal irradiance (DHI)** — the scattered component arriving from the rest of the sky dome.
+
+GHI is the primary measurement used in:
+
+- **Solar energy estimation** — calculating how much energy a location receives over a day, month, or year.
+- **Photovoltaic (PV) system sizing** — determining how large a panel array needs to be to meet a given energy demand.
+- **Climate and atmospheric analysis** — tracking cloud cover, aerosol loading, and surface radiation budgets.
+
+Because GHI is measured by a pyranometer mounted on a flat surface, its value depends directly on the position of the sun in the sky — which is why solar geometry is inseparable from GHI data quality.
+
+---
+
+## Top of Atmosphere (TOA) Irradiance
+
+The **Top of Atmosphere irradiance** (TOA) is the solar irradiance that would reach a horizontal surface if there were no atmosphere at all. It is the hard physical upper bound for any GHI measurement at ground level — no real observation can exceed it.
+
+TOA is computed in `Geo.py` as:
+
+```python
+def TOA(self, E0, CTZ):
+    if CTZ < 0:
+        return 0
+    else:
+        return 1361 * E0 * CTZ
+```
+
+<Info>
+  The formula is: `TOA = 1361 × E0 × cos(θz)`
+
+  - `1361` W/m² is the solar constant — the mean solar irradiance at the top of the atmosphere.
+  - `E0` is the **orbital correction factor**, which accounts for the slight variation in Earth–Sun distance throughout the year. It is computed from the day-of-year ordinal `N` as `1 + 0.033 × cos(2π × N / 365)`.
+  - `cos(θz)` is the cosine of the **Solar Zenith Angle** (stored as `CTZ` in the code — *cosine of tita z*). When the sun is directly overhead, `cos(θz) = 1` and TOA reaches its maximum. When the sun is at the horizon, `cos(θz) → 0` and TOA → 0.
+  - When `CTZ < 0` (sun below the horizon), TOA is set to zero.
+</Info>
+
+---
+
+## Solar Zenith Angle (SZA)
+
+The **Solar Zenith Angle (SZA)** is the angle between the sun's position and the vertical (zenith). It is the complement of the solar elevation angle.
+
+`SZA` is computed in `Geo.py` from the cosine of the zenith angle `CTZ`:
+
+```python
+self.df['TZ']  = self.df['CTZ'].apply(math.acos)      # zenith angle in radians
+self.df['SZA'] = self.df['CTZ'].apply(math.acos).apply(math.degrees)
+```
+
+`CTZ` itself is calculated from solar declination `δ`, latitude `φ`, and the hour angle `ω`:
+
+```python
+def getCTZ(self, delta, omega):
+    latR = math.radians(self.lat)
+    return (math.cos(latR) * math.cos(delta) * math.cos(omega)
+            + math.sin(latR) * math.sin(delta))
+```
+
+<Info>
+  Key SZA thresholds:
+
+  - **SZA = 0°** — sun directly overhead (maximum possible irradiance for the given date and location).
+  - **SZA = 90°** — sun exactly at the horizon. At this angle, `cos(θz) = 0` and TOA = 0.
+  - **SZA > 90°** — the sun is **below the horizon**. Any non-zero GHI reading at SZA > 90° is physically impossible and must be treated as noise, a sensor offset, or an electronic artefact.
+</Info>
+
+This boundary is used directly in the quality-control filters in `QualityControl.py`.
+
+---
+
+## Clear-Sky Model: ARGP
+
+The **clear-sky model** estimates what GHI *would* be on a perfectly clear day — no clouds, no aerosols beyond a climatological baseline. It provides a physically-grounded reference against which measured values can be compared.
+
+The workshop uses the **ARGP** (Argentine Radiation Parametric) model, implemented in `Geo.py`:
+
+```python
+def generateGHIargp(self, TOA, AM):
+    try:
+        return TOA * math.pow(self.ktrp, math.pow(AM, 0.678))
+    except Exception:
+        return 0
+```
+
+<Info>
+  The ARGP formula is: `GHI_clear = TOA × ktrp ^ (AM ^ 0.678)`
+
+  - **`ktrp`** is the clear-sky transmission parameter. It depends on altitude (`alt`) and is computed as:
+    - If altitude > 1000 m: `ktrp = 0.7 + 1.6391 × 10⁻³ × alt ^ 0.55`
+    - Otherwise: `ktrp = 0.7570 + 1.0112 × 10⁻⁵ × alt ^ 1.1067`
+
+    For station LQ at 3500 m, this gives a notably higher `ktrp` than sea-level sites — meaning the atmosphere is thinner and transmits more radiation, which is why high-altitude measurements can be surprisingly large.
+
+  - **`AM`** is the **Kasten air mass** — how much atmosphere the sunlight travels through relative to a vertical path. It is computed from `CTZ` and the zenith angle `TZ` (in radians), pressure-corrected for altitude:
+    ```python
+    def Mak(self, CTZ, TZ):
+        presion = 101355 * (288.15 / (288.15 - 0.0065 * self.altura)) ** -5.255877
+        Amk = 1 / (CTZ + 0.15 * (93.885 - TZ) ** -1.253)
+        return Amk * (presion / 101355)
+    ```
+    The pressure correction reduces the effective air mass at high-altitude sites.
+</Info>
+
+---
+
+## Physical Upper Bound: The QC Limit
+
+Beyond the TOA limit, `QualityControl.py` applies a tighter, empirically-derived upper boundary for daytime GHI that accounts for rare but physically possible super-clear-sky conditions (e.g. cloud-enhancement effects):
+
+```python
+df['filtro1'] = np.where(
+    df.SZA < 90,
+    df.ghi < 1.5 * 1361.7 * df.CTZ**1.2 + 100,
+    True
+)
+```
+
+<Tip>
+  Any GHI value that exceeds `1.5 × 1361.7 × CTZ^1.2 + 100` while the sun is above the horizon (SZA < 90°) is flagged as non-physical and rejected. This limit is deliberately generous — it allows for brief circumsolar enhancement — but catches clear sensor errors and calibration drift. At night (SZA ≥ 90°), all readings automatically pass `filtro1` regardless of their value; a separate filter (`filtro2`) handles nighttime sign checks instead.
+</Tip>
+
+---
+
+## Clearness Index (kt)
+
+The **clearness index** `kt` is the ratio of measured GHI to TOA irradiance. It quantifies how much of the extraterrestrial solar radiation actually reaches the surface:
+
+```python
+df['kt'] = np.where(df.TOA > 0, df.ghi / df.TOA, 0)
+df['filtro3'] = (df.kt < 1.4) & (df.kt > 0)
+```
+
+<Info>
+  `kt = GHI / TOA`
+
+  - A value near 1 indicates a very clear sky.
+  - A value near 0 indicates heavy cloud cover or that the sun is near the horizon.
+  - A value greater than 1 is physically impossible under normal conditions (it would mean the surface receives more radiation than the top of the atmosphere — which can occur briefly during circumsolar cloud-enhancement but is capped at 1.4 in the QC filter).
+  - Negative `kt` values mean the GHI reading is negative, which is a sensor artefact.
+
+  The QC filter requires `0 < kt < 1.4` for a reading to be accepted.
+</Info>
+
+---
+
+## Why Time-Series ML Is Different
+
+Preprocessing a time-series dataset for Machine Learning is not the same as preparing a standard tabular dataset. Three properties of time-series data demand special treatment:
+
+### Temporal Ordering Must Be Preserved
+
+In a conventional tabular dataset, rows are exchangeable — you can shuffle them freely for cross-validation. In a time-series, each observation depends on what came before. **Shuffling destroys this structure** and introduces data leakage: the model would "see" future values during training and appear to perform well while actually being useless in production.
+
+The correct approach is a **chronological train/test split** — all training data precedes all test data in time.
+
+### Autocorrelation
+
+Consecutive GHI readings are highly correlated: a sunny minute is likely to be followed by another sunny minute. This autocorrelation means that a model trained naively on randomly-split data would exploit temporal proximity between train and test samples, inflating apparent accuracy.
+
+### Seasonality
+
+GHI exhibits strong **diurnal** (within a day) and **annual** (across the year) cycles. These cycles must be either explicitly provided to the model as temporal features (hour of day, day of year, etc.) or removed through appropriate normalisation — otherwise the model must infer them implicitly, which is less efficient and less reliable.
+
+---
+
+## Evaluation Metrics
+
+The workshop uses several metrics to compare preprocessed model outputs against reference measurements. All are implemented in `helpers/Metrics.py`.
+
+### Point-to-Point Metrics
+
+These compare predicted and observed values at each timestamp:
+
+| Metric | Formula | What it measures |
+|---|---|---|
+| **MBE** — Mean Bias Error | `sum(pred - true) / n` | Systematic over- or under-prediction (bias direction) |
+| **MAE** — Mean Absolute Error | `sum(|pred - true|) / n` | Average magnitude of error, in the same units as GHI (W/m²) |
+| **RMSD** — Root Mean Square Deviation | `sqrt(sum((pred - true)²) / n)` | Error magnitude with extra weight on large deviations |
+
+Relative versions (rMBE, rMAE, rRMSD) are also available, expressed as a percentage of the observed mean.
+
+### Distribution-Based Metrics
+
+These compare the **statistical distributions** of two series rather than individual paired values — useful when evaluating whether a preprocessed or imputed dataset preserves the statistical character of the original:
+
+**KSI / OVER** — based on the Kolmogorov-Smirnov statistic:
+
+```python
+def KSI_OVER(Xval, Xest, CDF=0):
+    Vc = 1.63 / np.sqrt(sVAL)          # critical value
+    Dn = abs(CDFval_tot - CDFest_tot)  # absolute CDF difference
+    On = (Dn - Vc) * (Dn > Vc)        # excess above critical value
+    KSI  = np.trapz(Dn, xCDF_tot)     # area under |ΔCDF|
+    OVER = np.trapz(On, xCDF_tot)     # area above critical threshold
+```
+
+- **KSI** measures the total area between the two empirical CDFs. A value of zero means the distributions are identical.
+- **OVER** measures only the area where the CDF difference exceeds the critical threshold `Vc = 1.63 / sqrt(n)`. It captures statistically significant distributional differences.
+
+**SS4** — Skill Score:
+
+```python
+def SS4(true, pred):
+    rho       = correlation(pred, true)
+    STDRatio  = sigma_est / sigma_med
+    SS4       = ((1 + rho)**4) / (4 * (STDRatio + 1 / STDRatio)**2)
+```
+
+SS4 combines correlation and the ratio of standard deviations into a single score bounded between 0 and 1, where 1 indicates a perfect match in both correlation and variability. It is particularly informative for solar data because it rewards models that reproduce the correct spread of GHI values, not just the correct mean.

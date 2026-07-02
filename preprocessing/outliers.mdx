@@ -1,0 +1,62 @@
+---
+title: "Outlier Detection and Exploratory Data Analysis for GHI"
+sidebarTitle: "Outliers"
+description: "Identify anomalous GHI values through exploratory scatter plots using solar zenith angle, guiding context-aware data cleaning."
+---
+
+Before applying automated filters, **exploratory data analysis (EDA)** is the recommended first step. Plotting GHI against the Solar Zenith Angle reveals the physical envelope of the data and helps visually identify anomalies.
+
+## GHI vs. Solar Zenith Angle scatter plot
+
+Points that fall above the physical envelope or that appear at SZA > 90° are outliers:
+
+```python
+import matplotlib.pyplot as plt
+
+plt.figure()
+plt.plot(dfGeo.SZA, df.ghi, '.', ms=0.1)           # all points
+plt.plot(dfGeo[dfGeo.SZA > 90].SZA,
+         df.ghi[dfGeo.SZA > 90], '.r', ms=0.1)     # nighttime in red
+plt.xlabel('Solar Zenith Angle (°)')
+plt.ylabel('GHI (W/m²)')
+plt.title('GHI vs. SZA — outlier identification')
+plt.show()
+```
+
+Nighttime readings (SZA > 90°) are highlighted in red so they can be evaluated separately. Any GHI value that lies above the expected physical curve, or shows up in the red cluster at an unexpected magnitude, is a candidate for removal.
+
+## Context matters
+
+The workshop emphasizes that you should always understand what outliers represent in your domain **before** blindly removing them. A GHI spike might be:
+
+- A **sensor fault** (hardware malfunction or miscalibration)
+- A **cloud-edge effect** (brief enhancement due to reflections off cloud edges)
+- A **sensor obstruction** (shadow from a nearby object)
+
+Removing data without understanding the cause can introduce bias into your model.
+
+## Domain-specific outlier validation
+
+The principle of domain-aware validation applies across many data types:
+
+| Data type | Example validation | Reason |
+|-----------|-------------------|--------|
+| Time series | Detect abrupt jumps or physically impossible variations | Avoid false trends or extreme noise |
+| Financial data | Filter negative prices or out-of-range daily swings | Guard against market/loading errors |
+| IoT/sensor data | Remove impossible readings (temp \< −100 °C) | Defective sensors or corrupt transmission |
+
+## EDA before automated filters
+
+The workshop explicitly warns against relying solely on automated filters without first doing EDA — automated filters are easy to run but may silently mask real physical events. Visual inspection gives you the intuition needed to set thresholds and interpret QC results correctly.
+
+<Tip>
+Plot GHI for a single representative day (e.g. 2020-01-01) to understand the daily cycle before looking at multi-year data:
+
+```python
+from datetime import date
+plt.figure()
+mask = df.datetime.dt.date.isin([date(2020, 1, 1)])
+plt.plot(df[mask].datetime, df[mask].ghi)
+plt.show()
+```
+</Tip>

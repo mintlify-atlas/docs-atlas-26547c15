@@ -1,0 +1,98 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "ProfeLedesma — Taller de Preprocesamiento de Datos para ML",
+  "projectDescription": "An educational Python workshop covering time-series data preprocessing techniques for Machine Learning, using real GHI (Global Horizontal Irradiance) solar irradiance measurements as a hands-on case study.",
+  "theme": "palm",
+  "primaryColor": "#F59E0B",
+  "lightColor": "#FEF3C7",
+  "darkColor": "#92400E",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Workshop",
+        "groups": [
+          {
+            "group": "Introduction",
+            "pages": [
+              "introduction",
+              "concepts"
+            ]
+          },
+          {
+            "group": "The Dataset",
+            "pages": [
+              "dataset/overview",
+              "dataset/loading",
+              "dataset/sites"
+            ]
+          },
+          {
+            "group": "Preprocessing Steps",
+            "pages": [
+              "preprocessing/duplicates",
+              "preprocessing/quality-control",
+              "preprocessing/outliers",
+              "preprocessing/resampling"
+            ]
+          },
+          {
+            "group": "Modeling & Evaluation",
+            "pages": [
+              "modeling/train-test-split",
+              "modeling/metrics",
+              "modeling/bias-correction"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Helper Modules",
+            "pages": [
+              "api/geo",
+              "api/quality-control",
+              "api/metrics",
+              "api/sites"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Step-by-step data preprocessing pipeline for ML time-series data",
+    "GHI (Global Horizontal Irradiance) solar irradiance data cleaning",
+    "Duplicate detection and removal",
+    "Physical-model-based quality control filters (QC)",
+    "Outlier detection and exploratory data analysis",
+    "Time-series resampling (1min → 15min / 60min)",
+    "Solar geometry calculations (zenith angle, TOA irradiance, air mass)",
+    "Statistical error metrics: MBE, MAE, RMSD, KSI, OVER, SS4",
+    "Train/test splitting respecting temporal order",
+    "Model bias correction via linear regression"
+  ],
+  "publicApiSurface": [
+    "Geo(range_dates, lat, long, gmt, alt, beta) — solar geometry DataFrame",
+    "Geo.getE(n, y) — equation of time",
+    "Geo.delta(n, y) — solar declination (radians)",
+    "Geo.getCTZ(delta, omega) — cosine of solar zenith angle",
+    "Geo.TOA(E0, CTZ) — extraterrestrial irradiance (W/m²)",
+    "Geo.generateGHIargp(TOA, AM) — clear-sky GHI model (ARGP)",
+    "Geo.to_csv(name) — export geometry DataFrame to CSV",
+    "QC(df) — applies physical quality-control filters to a GHI DataFrame",
+    "mbe(true, pred) — Mean Bias Error",
+    "mae(true, pred) — Mean Absolute Error",
+    "rmsd(true, pred) — Root Mean Square Deviation",
+    "rmbe(true, pred) — Relative MBE (%)",
+    "rmae(true, pred) — Relative MAE (%)",
+    "rrmsd(true, pred) — Relative RMSD (%)",
+    "KSI_OVER(Xval, Xest) — Kolmogorov-Smirnov Integral and OVER metric",
+    "SS4(true, pred) — Skill Score (SS4)",
+    "ecdf(x) — Empirical CDF",
+    "Site(cod) — site metadata lookup by station code",
+    "Site.describe() — print site coordinates",
+    "Site.getNeighbors(order) — get neighboring grid cells"
+  ]
+}

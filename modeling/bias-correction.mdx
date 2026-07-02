@@ -1,0 +1,98 @@
+---
+title: "Correcting Systematic Bias in GHI Model Predictions"
+sidebarTitle: "Bias Correction"
+description: "Apply a linear regression bias correction to a GHI model that shows systematic underestimation, and evaluate the improvement with before/after metrics."
+---
+
+## What Is Systematic Bias?
+
+Even after careful preprocessing, a GHI model may exhibit **systematic bias** — for example, consistently underestimating measured values (negative rMBE). This kind of offset is structural: the model is not wrong at random, it is wrong in the same direction every time.
+
+A simple **linear regression bias correction** of the form `Y = a·X + b` can significantly improve predictions without rebuilding the model from scratch.
+
+---
+
+## Detecting Bias with `rmbe`
+
+Compute `rmbe` on the training set to detect and quantify systematic bias before applying any correction.
+
+- **Negative rMBE** → the model systematically *underestimates* measured GHI.
+- **Positive rMBE** → the model systematically *overestimates* measured GHI.
+
+```python
+import helpers.Metrics as ms
+
+dfTrain = df[df.datetime.dt.year == 2020].dropna()
+dfTest  = df[df.datetime.dt.year > 2020].dropna()
+
+bias_train = ms.rmbe(dfTrain.ghi, dfTrain.GHImod)
+print(f'Training rMBE before correction: {bias_train:.2f}%')
+```
+
+---
+
+## Fitting the Linear Correction
+
+The correction model `Y = a·X + b` is fit using scikit-learn's `LinearRegression`, where `X` is the model output and `Y` is the measured GHI. Training is done **on the training set only** — applying the correction to the same data used to fit it estimates in-sample performance; the real test comes on the held-out test set.
+
+```python
+from sklearn.linear_model import LinearRegression
+
+# Reshape model output into a 2-D column vector for sklearn
+XTrain = dfTrain.GHImod.values.reshape(-1, 1)
+yTrain = dfTrain.ghi.values
+
+# Fit linear correction on training data
+reg = LinearRegression().fit(XTrain, yTrain)
+
+# Apply to both sets
+yTrainCorregida = reg.predict(XTrain)
+yTestCorregida  = reg.predict(dfTest.GHImod.values.reshape(-1, 1))
+```
+
+---
+
+## Evaluating the Improvement
+
+Recompute metrics on both sets to measure the impact of the correction. The expected result is a bias close to zero and a reduction in RMSD on the test set.
+
+```python
+# --- Training set ---
+print('--- Training set ---')
+print(f'rRMSD before: {ms.rrmsd(dfTrain.ghi, dfTrain.GHImod):.2f}%')
+print(f'rRMSD after:  {ms.rrmsd(dfTrain.ghi, yTrainCorregida):.2f}%')
+print(f'rMBE  before: {ms.rmbe(dfTrain.ghi, dfTrain.GHImod):.2f}%')
+print(f'rMBE  after:  {ms.rmbe(dfTrain.ghi, yTrainCorregida):.2f}%')
+
+# --- Test set ---
+print('--- Test set ---')
+print(f'rRMSD before: {ms.rrmsd(dfTest.ghi, dfTest.GHImod):.2f}%')
+print(f'rRMSD after:  {ms.rrmsd(dfTest.ghi, yTestCorregida):.2f}%')
+print(f'rMBE  before: {ms.rmbe(dfTest.ghi, dfTest.GHImod):.2f}%')
+print(f'rMBE  after:  {ms.rmbe(dfTest.ghi, yTestCorregida):.2f}%')
+```
+
+Store the corrected predictions back into the test DataFrame for downstream use or plotting:
+
+```python
+dfTest['GHIcorr'] = yTestCorregida
+```
+
+---
+
+<Tip>
+Compare before/after metrics side by side to communicate results clearly:
+
+| Metric | Before | After |
+|--------|--------|-------|
+| rMBE (%) | value | value |
+| rMAE (%) | value | value |
+| rRMSD (%) | value | value |
+| SS4 | value | value |
+
+Replace `value` with the numbers produced by your metric calls.
+</Tip>
+
+<Note>
+Linear bias correction is a **post-processing step**, not a substitute for a well-calibrated model. It corrects for a constant multiplicative/additive offset but cannot fix structural model errors such as systematic misrepresentation of cloud effects or incorrect aerosol assumptions. If those deeper problems exist, the corrected model will still underperform on data that differs significantly from the training period.
+</Note>
